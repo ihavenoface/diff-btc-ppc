@@ -37,7 +37,9 @@ jobs:
       - name: Fetch peercoin
         run: make peercoin
       - name: Compile
-        run: make -j $(nproc) html index.html
+        run: |
+          make clean
+          make -j $(nproc) html index.html
       - name: Clean up
         run: rm -rf peercoin
       - name: Upload artifact

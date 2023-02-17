@@ -1,0 +1,35 @@
+diff --git a/src/node/psbt.cpp b/src/node/psbt.cpp
+index 5a932f435d..3fe6394443 100644
+--- a/src/node/psbt.cpp
++++ b/src/node/psbt.cpp
+@@ -5,9 +5,11 @@
+ #include <coins.h>
+ #include <consensus/amount.h>
+ #include <consensus/tx_verify.h>
++#include <kernel.h>
+ #include <node/psbt.h>
+ #include <policy/policy.h>
+ #include <policy/settings.h>
++#include <timedata.h>
+ #include <tinyformat.h>
+ 
+ #include <numeric>
+@@ -131,7 +133,7 @@ PSBTAnalysis AnalyzePSBT(PartiallySignedTransaction psbtx)
+                 mtx.vin[i].scriptSig = input.final_script_sig;
+                 mtx.vin[i].scriptWitness = input.final_script_witness;
+                 newcoin.nHeight = 1;
+-                view.AddCoin(psbtx.tx->vin[i].prevout, std::move(newcoin), true);
++                view.AddCoin(psbtx.tx->vin[i].prevout, std::move(newcoin), true, true);
+             }
+         }
+ 
+@@ -139,9 +141,6 @@ PSBTAnalysis AnalyzePSBT(PartiallySignedTransaction psbtx)
+             CTransaction ctx = CTransaction(mtx);
+             size_t size = GetVirtualTransactionSize(ctx, GetTransactionSigOpCost(ctx, view, STANDARD_SCRIPT_VERIFY_FLAGS));
+             result.estimated_vsize = size;
+-            // Estimate fee rate
+-            CFeeRate feerate(fee, size);
+-            result.estimated_feerate = feerate;
+         }
+ 
+     }

@@ -1,0 +1,16 @@
+diff --git a/src/uint256.h b/src/uint256.h
+index 5c3a2f5409..967b45b9a9 100644
+--- a/src/uint256.h
++++ b/src/uint256.h
+@@ -22,6 +22,11 @@ protected:
+     static constexpr int WIDTH = BITS / 8;
+     uint8_t m_data[WIDTH];
+ public:
++    const uint32_t *GetDataPtr() const
++    {
++        return (const uint32_t *)m_data;
++    }
++
+     /* construct 0 value by default */
+     constexpr base_blob() : m_data() {}
+ 

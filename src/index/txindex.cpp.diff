@@ -1,0 +1,13 @@
+diff --git a/src/index/txindex.cpp b/src/index/txindex.cpp
+index e1d807f39a..462112dffe 100644
+--- a/src/index/txindex.cpp
++++ b/src/index/txindex.cpp
+@@ -100,3 +100,8 @@ bool TxIndex::FindTx(const uint256& tx_hash, uint256& block_hash, CTransactionRe
+     block_hash = header.GetHash();
+     return true;
+ }
++
++bool TxIndex::FindTxPosition(const uint256& txid, CDiskTxPos& pos) const
++{
++    return m_db->ReadTxPos(txid, pos);
++}

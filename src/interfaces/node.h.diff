@@ -1,0 +1,63 @@
+diff --git a/src/interfaces/node.h b/src/interfaces/node.h
+index c4dc303dd5..cc6e26b901 100644
+--- a/src/interfaces/node.h
++++ b/src/interfaces/node.h
+@@ -6,11 +6,13 @@
+ #define BITCOIN_INTERFACES_NODE_H
+ 
+ #include <consensus/amount.h>
++#include <node/chainstate.h>
+ #include <net.h>        // For NodeId
+ #include <net_types.h>  // For banmap_t
+ #include <netaddress.h> // For Network
+ #include <netbase.h>    // For ConnectionDirection
+ #include <support/allocators/secure.h> // For SecureString
++#include <util/ui_change_type.h>
+ #include <util/translation.h>
+ 
+ #include <functional>
+@@ -22,7 +24,6 @@
+ #include <vector>
+ 
+ class BanMan;
+-class CFeeRate;
+ class CNodeStats;
+ class Coin;
+ class RPCTimerInterface;
+@@ -70,6 +71,8 @@ class Node
+ public:
+     virtual ~Node() {}
+ 
++    virtual ChainstateManager& chainman() = 0;
++
+     //! Init logging.
+     virtual void initLogging() = 0;
+ 
+@@ -170,9 +173,6 @@ public:
+     //! Get network active.
+     virtual bool getNetworkActive() = 0;
+ 
+-    //! Get dust relay fee.
+-    virtual CFeeRate getDustRelayFee() = 0;
+-
+     //! Execute rpc command.
+     virtual UniValue executeRpc(const std::string& command, const UniValue& params, const std::string& uri) = 0;
+ 
+@@ -189,7 +189,7 @@ public:
+     virtual bool getUnspentOutput(const COutPoint& output, Coin& coin) = 0;
+ 
+     //! Broadcast transaction.
+-    virtual TransactionError broadcastTransaction(CTransactionRef tx, CAmount max_tx_fee, std::string& err_string) = 0;
++    virtual TransactionError broadcastTransaction(CTransactionRef tx, std::string& err_string) = 0;
+ 
+     //! Get wallet loader.
+     virtual WalletLoader& walletLoader() = 0;
+@@ -227,7 +227,7 @@ public:
+     virtual std::unique_ptr<Handler> handleNotifyNetworkActiveChanged(NotifyNetworkActiveChangedFn fn) = 0;
+ 
+     //! Register handler for notify alert messages.
+-    using NotifyAlertChangedFn = std::function<void()>;
++    using NotifyAlertChangedFn = std::function<void(const uint256 &hash, ChangeType status)>;
+     virtual std::unique_ptr<Handler> handleNotifyAlertChanged(NotifyAlertChangedFn fn) = 0;
+ 
+     //! Register handler for ban list messages.

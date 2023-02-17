@@ -1,0 +1,20 @@
+diff --git a/src/dummywallet.cpp b/src/dummywallet.cpp
+index 2b94ed611b..72af020942 100644
+--- a/src/dummywallet.cpp
++++ b/src/dummywallet.cpp
+@@ -35,7 +35,6 @@ void DummyWalletInit::AddWalletOptions(ArgsManager& argsman) const
+         "-fallbackfee=<amt>",
+         "-keypool=<n>",
+         "-maxapsfee=<n>",
+-        "-maxtxfee=<amt>",
+         "-mintxfee=<amt>",
+         "-paytxfee=<amt>",
+         "-signer=<cmd>",
+@@ -45,7 +44,6 @@ void DummyWalletInit::AddWalletOptions(ArgsManager& argsman) const
+         "-walletbroadcast",
+         "-walletdir=<dir>",
+         "-walletnotify=<cmd>",
+-        "-walletrbf",
+         "-dblogsize=<n>",
+         "-flushwallet",
+         "-privdb",

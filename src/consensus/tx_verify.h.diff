@@ -1,0 +1,29 @@
+diff --git a/src/consensus/tx_verify.h b/src/consensus/tx_verify.h
+index 1209c0faa5..92d27b50fa 100644
+--- a/src/consensus/tx_verify.h
++++ b/src/consensus/tx_verify.h
+@@ -18,13 +18,14 @@ class TxValidationState;
+ /** Transaction validation functions */
+ 
+ namespace Consensus {
++struct Params;
+ /**
+  * Check whether all inputs of this transaction are valid (no double spends and amounts)
+  * This does not modify the UTXO set. This does not check scripts and sigs.
+  * @param[out] txfee Set to the transaction fee if successful.
+  * Preconditions: tx.IsCoinBase() is false.
+  */
+-[[nodiscard]] bool CheckTxInputs(const CTransaction& tx, TxValidationState& state, const CCoinsViewCache& inputs, int nSpendHeight, CAmount& txfee);
++bool CheckTxInputs(const CTransaction& tx, TxValidationState& state, const CCoinsViewCache& inputs, int nSpendHeight, CAmount& txfee, const Consensus::Params& params, unsigned int nTimeTx, uint64_t nMoneySupply=0);
+ } // namespace Consensus
+ 
+ /** Auxiliary functions for transaction validation (ideally should not be exposed) */
+@@ -75,4 +76,8 @@ bool EvaluateSequenceLocks(const CBlockIndex& block, std::pair<int, int64_t> loc
+  */
+ bool SequenceLocks(const CTransaction &tx, int flags, std::vector<int>& prevHeights, const CBlockIndex& block);
+ 
++// peercoin: minimum fee for transaction to be accepted in a blockchain.
++CAmount GetMinFee(const CTransaction& tx, unsigned int nTimeTx);
++CAmount GetMinFee(size_t nBytes, uint32_t nTime);
++
+ #endif // BITCOIN_CONSENSUS_TX_VERIFY_H

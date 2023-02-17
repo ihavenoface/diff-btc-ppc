@@ -1,0 +1,104 @@
+diff --git a/src/bitcoin-tx.cpp b/src/bitcoin-tx.cpp
+index b297081cab..492486e1c3 100644
+--- a/src/bitcoin-tx.cpp
++++ b/src/bitcoin-tx.cpp
+@@ -14,14 +14,12 @@
+ #include <key_io.h>
+ #include <fs.h>
+ #include <policy/policy.h>
+-#include <policy/rbf.h>
+ #include <primitives/transaction.h>
+ #include <script/script.h>
+ #include <script/sign.h>
+ #include <script/signingprovider.h>
+ #include <univalue.h>
+ #include <util/moneystr.h>
+-#include <util/rbf.h>
+ #include <util/strencodings.h>
+ #include <util/string.h>
+ #include <util/system.h>
+@@ -54,6 +52,7 @@ static void SetupBitcoinTxArgs(ArgsManager &argsman)
+     argsman.AddArg("in=TXID:VOUT(:SEQUENCE_NUMBER)", "Add input to TX", ArgsManager::ALLOW_ANY, OptionsCategory::COMMANDS);
+     argsman.AddArg("locktime=N", "Set TX lock time to N", ArgsManager::ALLOW_ANY, OptionsCategory::COMMANDS);
+     argsman.AddArg("nversion=N", "Set TX version to N", ArgsManager::ALLOW_ANY, OptionsCategory::COMMANDS);
++    argsman.AddArg("ntime=N", "Set TX timestamp to N", ArgsManager::ALLOW_ANY, OptionsCategory::COMMANDS);
+     argsman.AddArg("outaddr=VALUE:ADDRESS", "Add address-based output to TX", ArgsManager::ALLOW_ANY, OptionsCategory::COMMANDS);
+     argsman.AddArg("outdata=[VALUE:]DATA", "Add data-based output to TX", ArgsManager::ALLOW_ANY, OptionsCategory::COMMANDS);
+     argsman.AddArg("outmultisig=VALUE:REQUIRED:PUBKEYS:PUBKEY1:PUBKEY2:....[:FLAGS]", "Add Pay To n-of-m Multi-sig output to TX. n = REQUIRED, m = PUBKEYS. "
+@@ -65,7 +64,6 @@ static void SetupBitcoinTxArgs(ArgsManager &argsman)
+     argsman.AddArg("outscript=VALUE:SCRIPT[:FLAGS]", "Add raw script output to TX. "
+         "Optionally add the \"W\" flag to produce a pay-to-witness-script-hash output. "
+         "Optionally add the \"S\" flag to wrap the output in a pay-to-script-hash.", ArgsManager::ALLOW_ANY, OptionsCategory::COMMANDS);
+-    argsman.AddArg("replaceable(=N)", "Set RBF opt-in sequence number for input N (if not provided, opt-in all available inputs)", ArgsManager::ALLOW_ANY, OptionsCategory::COMMANDS);
+     argsman.AddArg("sign=SIGHASH-FLAGS", "Add zero or more signatures to transaction. "
+         "This command requires JSON registers:"
+         "prevtxs=JSON object, "
+@@ -101,14 +99,14 @@ static int AppInitRawTx(int argc, char* argv[])
+ 
+     if (argc < 2 || HelpRequested(gArgs) || gArgs.IsArgSet("-version")) {
+         // First part of help message is specific to this utility
+-        std::string strUsage = PACKAGE_NAME " bitcoin-tx utility version " + FormatFullVersion() + "\n";
++        std::string strUsage = PACKAGE_NAME " peercoin-tx utility version " + FormatFullVersion() + "\n";
+ 
+         if (gArgs.IsArgSet("-version")) {
+             strUsage += FormatParagraph(LicenseInfo());
+         } else {
+             strUsage += "\n"
+-                "Usage:  bitcoin-tx [options] <hex-tx> [commands]  Update hex-encoded bitcoin transaction\n"
+-                "or:     bitcoin-tx [options] -create [commands]   Create hex-encoded bitcoin transaction\n"
++                "Usage:  peercoin-tx [options] <hex-tx> [commands]  Update hex-encoded peercoin transaction\n"
++                "or:     peercoin-tx [options] -create [commands]   Create hex-encoded peercoin transaction\n"
+                 "\n";
+             strUsage += gArgs.GetHelpMessage();
+         }
+@@ -219,24 +217,13 @@ static void MutateTxLocktime(CMutableTransaction& tx, const std::string& cmdVal)
+     tx.nLockTime = (unsigned int) newLocktime;
+ }
+ 
+-static void MutateTxRBFOptIn(CMutableTransaction& tx, const std::string& strInIdx)
++static void MutateTxTime(CMutableTransaction& tx, const std::string& cmdVal)
+ {
+-    // parse requested index
+-    int64_t inIdx;
+-    if (!ParseInt64(strInIdx, &inIdx) || inIdx < 0 || inIdx >= static_cast<int64_t>(tx.vin.size())) {
+-        throw std::runtime_error("Invalid TX input index '" + strInIdx + "'");
+-    }
++    int64_t newTime;
++    if (!ParseInt64(cmdVal, &newTime) || newTime < 0LL || newTime > 0xffffffffLL)
++        throw std::runtime_error("Invalid TX time requested: '" + cmdVal + "'");
+ 
+-    // set the nSequence to MAX_INT - 2 (= RBF opt in flag)
+-    int cnt = 0;
+-    for (CTxIn& txin : tx.vin) {
+-        if (strInIdx == "" || cnt == inIdx) {
+-            if (txin.nSequence > MAX_BIP125_RBF_SEQUENCE) {
+-                txin.nSequence = MAX_BIP125_RBF_SEQUENCE;
+-            }
+-        }
+-        ++cnt;
+-    }
++    tx.nTime = (unsigned int) newTime;
+ }
+ 
+ template <typename T>
+@@ -559,7 +546,7 @@ static CAmount AmountFromValue(const UniValue& value)
+     if (!value.isNum() && !value.isStr())
+         throw std::runtime_error("Amount is not a number or string");
+     CAmount amount;
+-    if (!ParseFixedPoint(value.getValStr(), 8, &amount))
++    if (!ParseFixedPoint(value.getValStr(), 6, &amount))
+         throw std::runtime_error("Invalid amount");
+     if (!MoneyRange(amount))
+         throw std::runtime_error("Amount out of range");
+@@ -708,9 +695,8 @@ static void MutateTx(CMutableTransaction& tx, const std::string& command,
+         MutateTxVersion(tx, commandVal);
+     else if (command == "locktime")
+         MutateTxLocktime(tx, commandVal);
+-    else if (command == "replaceable") {
+-        MutateTxRBFOptIn(tx, commandVal);
+-    }
++    else if (command == "ntime")
++        MutateTxTime(tx, commandVal);
+ 
+     else if (command == "delin")
+         MutateTxDelInput(tx, commandVal);

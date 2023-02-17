@@ -1,0 +1,13 @@
+diff --git a/src/timedatadummy.cpp b/src/timedatadummy.cpp
+new file mode 100644
+index 0000000000..475d7c8c5d
+--- /dev/null
++++ b/src/timedatadummy.cpp
+@@ -0,0 +1,7 @@
++#include <stdint.h>
++
++// needed when linking transaction.cpp, since we are not going to pull real GetAdjustedTime from timedata.cpp
++int64_t GetAdjustedTime()
++{
++    return 0;
++}

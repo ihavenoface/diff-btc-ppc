@@ -1,0 +1,99 @@
+diff --git a/src/primitives/transaction.h b/src/primitives/transaction.h
+index fb98fb6868..228f32ad8a 100644
+--- a/src/primitives/transaction.h
++++ b/src/primitives/transaction.h
+@@ -12,6 +12,7 @@
+ #include <serialize.h>
+ #include <uint256.h>
+ 
++#include <version.h>
+ #include <tuple>
+ 
+ /**
+@@ -171,6 +172,17 @@ public:
+         return (nValue == -1);
+     }
+ 
++    void SetEmpty()
++    {
++        nValue = 0;
++        scriptPubKey.clear();
++    }
++
++    bool IsEmpty() const
++    {
++        return (nValue == 0 && scriptPubKey.empty());
++    }
++
+     friend bool operator==(const CTxOut& a, const CTxOut& b)
+     {
+         return (a.nValue       == b.nValue &&
+@@ -209,6 +221,11 @@ inline void UnserializeTransaction(TxType& tx, Stream& s) {
+     const bool fAllowWitness = !(s.GetVersion() & SERIALIZE_TRANSACTION_NO_WITNESS);
+ 
+     s >> tx.nVersion;
++    if (tx.nVersion < 3)
++        s >> tx.nTime;
++    else
++        tx.nTime = 0;
++
+     unsigned char flags = 0;
+     tx.vin.clear();
+     tx.vout.clear();
+@@ -248,6 +265,8 @@ inline void SerializeTransaction(const TxType& tx, Stream& s) {
+     const bool fAllowWitness = !(s.GetVersion() & SERIALIZE_TRANSACTION_NO_WITNESS);
+ 
+     s << tx.nVersion;
++    if (tx.nVersion<3)
++        s << tx.nTime;
+     unsigned char flags = 0;
+     // Consistency check
+     if (fAllowWitness) {
+@@ -272,7 +291,6 @@ inline void SerializeTransaction(const TxType& tx, Stream& s) {
+     s << tx.nLockTime;
+ }
+ 
+-
+ /** The basic transaction that is broadcasted on the network and contained in
+  * blocks.  A transaction can contain multiple inputs and outputs.
+  */
+@@ -280,7 +298,7 @@ class CTransaction
+ {
+ public:
+     // Default transaction version.
+-    static const int32_t CURRENT_VERSION=2;
++    static const int32_t CURRENT_VERSION=3;
+ 
+     // The local variables are made const to prevent unintended modification
+     // without updating the cached hash value. However, CTransaction is not
+@@ -290,6 +308,7 @@ public:
+     const std::vector<CTxIn> vin;
+     const std::vector<CTxOut> vout;
+     const int32_t nVersion;
++    const uint32_t nTime;
+     const uint32_t nLockTime;
+ 
+ private:
+@@ -334,7 +353,13 @@ public:
+ 
+     bool IsCoinBase() const
+     {
+-        return (vin.size() == 1 && vin[0].prevout.IsNull());
++        return (vin.size() == 1 && vin[0].prevout.IsNull() && vout.size() >= 1);
++    }
++
++    bool IsCoinStake() const
++    {
++        // peercoin: the coin stake transaction is marked with the first output empty
++        return (vin.size() > 0 && (!vin[0].prevout.IsNull()) && vout.size() >= 2 && vout[0].IsEmpty());
+     }
+ 
+     friend bool operator==(const CTransaction& a, const CTransaction& b)
+@@ -366,6 +391,7 @@ struct CMutableTransaction
+     std::vector<CTxIn> vin;
+     std::vector<CTxOut> vout;
+     int32_t nVersion;
++    uint32_t nTime;
+     uint32_t nLockTime;
+ 
+     CMutableTransaction();

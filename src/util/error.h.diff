@@ -1,0 +1,12 @@
+diff --git a/src/util/error.h b/src/util/error.h
+index 4cc35eb1fd..98102026bf 100644
+--- a/src/util/error.h
++++ b/src/util/error.h
+@@ -29,7 +29,6 @@ enum class TransactionError {
+     INVALID_PSBT,
+     PSBT_MISMATCH,
+     SIGHASH_MISMATCH,
+-    MAX_FEE_EXCEEDED,
+     EXTERNAL_SIGNER_NOT_FOUND,
+     EXTERNAL_SIGNER_FAILED,
+ };

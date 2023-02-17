@@ -1,0 +1,20 @@
+diff --git a/src/node/psbt.h b/src/node/psbt.h
+index cbb3bd8201..87eb632b4c 100644
+--- a/src/node/psbt.h
++++ b/src/node/psbt.h
+@@ -29,7 +29,6 @@ struct PSBTInputAnalysis {
+  */
+ struct PSBTAnalysis {
+     std::optional<size_t> estimated_vsize;      //!< Estimated weight of the transaction
+-    std::optional<CFeeRate> estimated_feerate;  //!< Estimated feerate (fee / weight) of the transaction
+     std::optional<CAmount> fee;                 //!< Amount of fee being paid by the transaction
+     std::vector<PSBTInputAnalysis> inputs;      //!< More information about the individual inputs of the transaction
+     PSBTRole next;                              //!< Which of the BIP 174 roles needs to handle the transaction next
+@@ -38,7 +37,6 @@ struct PSBTAnalysis {
+     void SetInvalid(std::string err_msg)
+     {
+         estimated_vsize = std::nullopt;
+-        estimated_feerate = std::nullopt;
+         fee = std::nullopt;
+         inputs.clear();
+         next = PSBTRole::CREATOR;

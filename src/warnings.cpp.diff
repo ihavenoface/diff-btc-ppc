@@ -1,0 +1,26 @@
+diff --git a/src/warnings.cpp b/src/warnings.cpp
+index 60388cc713..2ecd96681e 100644
+--- a/src/warnings.cpp
++++ b/src/warnings.cpp
+@@ -15,6 +15,7 @@
+ static Mutex g_warnings_mutex;
+ static bilingual_str g_misc_warnings GUARDED_BY(g_warnings_mutex);
+ static bool fLargeWorkInvalidChainFound GUARDED_BY(g_warnings_mutex) = false;
++std::string strMintWarning;
+ 
+ void SetMiscWarning(const bilingual_str& warning)
+ {
+@@ -41,6 +42,13 @@ bilingual_str GetWarnings(bool verbose)
+         warnings_verbose.emplace_back(warnings_concise);
+     }
+ 
++    // peercoin: wallet lock warning for minting
++    if (strMintWarning != "")
++    {
++        warnings_concise = Untranslated(strMintWarning);
++        warnings_verbose.emplace_back(warnings_concise);
++    }
++
+     // Misc warnings like out of disk space and clock is wrong
+     if (!g_misc_warnings.empty()) {
+         warnings_concise = g_misc_warnings;

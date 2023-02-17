@@ -1,0 +1,28 @@
+diff --git a/src/consensus/tx_check.cpp b/src/consensus/tx_check.cpp
+index f949655909..833089c36a 100644
+--- a/src/consensus/tx_check.cpp
++++ b/src/consensus/tx_check.cpp
+@@ -7,6 +7,12 @@
+ #include <consensus/amount.h>
+ #include <primitives/transaction.h>
+ #include <consensus/validation.h>
++#include <chainparams.h>
++
++bool IsZeroAllowed(const unsigned int nTimeTx)
++{
++    return (nTimeTx >= 1447700000 ); // very crude approximation to prevent linking with kernel.cpp
++}
+ 
+ bool CheckTransaction(const CTransaction& tx, TxValidationState& state)
+ {
+@@ -30,6 +36,10 @@ bool CheckTransaction(const CTransaction& tx, TxValidationState& state)
+         nValueOut += txout.nValue;
+         if (!MoneyRange(nValueOut))
+             return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-txouttotal-toolarge");
++        // peercoin: enforce minimum output amount
++        if ((!txout.IsEmpty()) && txout.nValue < MIN_TXOUT_AMOUNT &&
++            (tx.nVersion < 3 && !(IsZeroAllowed(tx.nTime) && (txout.nValue == 0))))
++            return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-txoutvalue-belowminimum");
+     }
+ 
+     // Check for duplicate inputs (see CVE-2018-17144)

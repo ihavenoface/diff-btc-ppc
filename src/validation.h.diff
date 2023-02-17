@@ -1,0 +1,153 @@
+diff --git a/src/validation.h b/src/validation.h
+index 7766d77a88..063c1f9e0b 100644
+--- a/src/validation.h
++++ b/src/validation.h
+@@ -16,16 +16,17 @@
+ #include <consensus/amount.h>
+ #include <fs.h>
+ #include <node/blockstorage.h>
+-#include <policy/feerate.h>
+ #include <policy/packages.h>
+ #include <script/script_error.h>
+ #include <sync.h>
++#include <chain.h>
+ #include <txdb.h>
+ #include <txmempool.h> // For CTxMemPool::cs
+ #include <uint256.h>
+ #include <util/check.h>
+ #include <util/hasher.h>
+ #include <util/translation.h>
++#include <wallet/wallet.h>
+ 
+ #include <atomic>
+ #include <map>
+@@ -41,8 +42,14 @@
+ class CChainState;
+ class CBlockTreeDB;
+ class CChainParams;
++namespace wallet {
++class CWallet;
++} // namespace wallet
++//class CWallet;
++using wallet::CWallet;
+ class CTxMemPool;
+ class ChainstateManager;
++class CKeyStore;
+ struct ChainTxData;
+ struct DisconnectedBlockTransactions;
+ struct PrecomputedTransactionData;
+@@ -52,8 +59,6 @@ namespace node {
+ class SnapshotMetadata;
+ } // namespace node
+ 
+-/** Default for -minrelaytxfee, minimum relay fee for transactions */
+-static const unsigned int DEFAULT_MIN_RELAY_TX_FEE = 1000;
+ /** Default for -limitancestorcount, max number of in-mempool ancestors */
+ static const unsigned int DEFAULT_ANCESTOR_LIMIT = 25;
+ /** Default for -limitancestorsize, maximum kilobytes of tx + all in-mempool ancestors */
+@@ -80,7 +85,7 @@ static const int MAX_SCRIPTCHECK_THREADS = 15;
+ static const int DEFAULT_SCRIPTCHECK_THREADS = 0;
+ static const int64_t DEFAULT_MAX_TIP_AGE = 24 * 60 * 60;
+ static const bool DEFAULT_CHECKPOINTS_ENABLED = true;
+-static const bool DEFAULT_TXINDEX = false;
++static const bool DEFAULT_TXINDEX = true;  // peercoin: txindex is required for PoS calculations (might change in the future)
+ static constexpr bool DEFAULT_COINSTATSINDEX{false};
+ static const char* const DEFAULT_BLOCKFILTERINDEX = "0";
+ /** Default for -persistmempool */
+@@ -120,8 +125,7 @@ extern bool g_parallel_script_checks;
+ extern bool fRequireStandard;
+ extern bool fCheckBlockIndex;
+ extern bool fCheckpointsEnabled;
+-/** A fee rate smaller than this is considered zero fee (for relaying, mining and transaction creation) */
+-extern CFeeRate minRelayTxFee;
++extern bool fAlerts;
+ /** If the tip is older than this (in seconds), the node is considered to be in initial block download. */
+ extern int64_t nMaxTipAge;
+ 
+@@ -134,9 +138,11 @@ extern arith_uint256 nMinimumChainWork;
+ /** Best header we've seen so far (used for getheaders queries' starting points). */
+ extern CBlockIndex *pindexBestHeader;
+ 
++
+ /** Documentation for argument 'checklevel'. */
+ extern const std::vector<std::string> CHECKLEVEL_DOC;
+ 
++
+ /** Unload database information */
+ void UnloadBlockIndex(CTxMemPool* mempool, ChainstateManager& chainman);
+ /** Run instances of script checking worker threads */
+@@ -144,15 +150,12 @@ void StartScriptCheckWorkerThreads(int threads_num);
+ /** Stop all of the script checking worker threads */
+ void StopScriptCheckWorkerThreads();
+ 
+-CAmount GetBlockSubsidy(int nHeight, const Consensus::Params& consensusParams);
+ 
+ bool AbortNode(BlockValidationState& state, const std::string& strMessage, const bilingual_str& userMessage = bilingual_str{});
+ 
+ /** Guess verification progress (as a fraction between 0.0=genesis and 1.0=current tip). */
+ double GuessVerificationProgress(const ChainTxData& data, const CBlockIndex* pindex);
+ 
+-/** Prune block files up to a given height */
+-void PruneBlockFilesManual(CChainState& active_chainstate, int nManualPruneHeight);
+ 
+ /**
+ * Validation result for a single transaction mempool acceptance.
+@@ -272,7 +275,6 @@ MempoolAcceptResult AcceptToMemoryPool(CChainState& active_chainstate, const CTr
+ PackageMempoolAcceptResult ProcessNewPackage(CChainState& active_chainstate, CTxMemPool& pool,
+                                                    const Package& txns, bool test_accept)
+                                                    EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+-
+ /** Transaction validation functions */
+ 
+ /**
+@@ -351,7 +353,7 @@ void InitScriptExecutionCache();
+ /** Functions for validating blocks and updating the block tree */
+ 
+ /** Context-independent validity checks */
+-bool CheckBlock(const CBlock& block, BlockValidationState& state, const Consensus::Params& consensusParams, bool fCheckPOW = true, bool fCheckMerkleRoot = true);
++bool CheckBlock(const CBlock& block, BlockValidationState& state, const Consensus::Params& consensusParams, bool fCheckPOW = true, bool fCheckMerkleRoot = true, bool fCheckSignature = true);
+ 
+ /** Check a block is completely valid from start to finish (only works on top of our current best block) */
+ bool TestBlockValidity(BlockValidationState& state,
+@@ -624,10 +626,6 @@ public:
+     //! Unconditionally flush all changes to disk.
+     void ForceFlushStateToDisk();
+ 
+-    //! Prune blockfiles from the disk if necessary and then flush chainstate changes
+-    //! if we pruned.
+-    void PruneAndFlush();
+-
+     /**
+      * Find the best known block, and make it the tip of the block chain. The
+      * result is either failure or an activated best chain. pblock is either
+@@ -961,7 +959,7 @@ public:
+      * @param[out]  new_block A boolean which is set to indicate if the block was first received via this call
+      * @returns     If the block was processed, independently of block validity
+      */
+-    bool ProcessNewBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock>& block, bool force_processing, bool* new_block) LOCKS_EXCLUDED(cs_main);
++    bool ProcessNewBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock>& block, bool force_processing, bool* new_block, CBlockIndex** ppindex = nullptr, bool* fPoSDuplicate = nullptr) LOCKS_EXCLUDED(cs_main);
+ 
+     /**
+      * Process incoming block headers.
+@@ -974,7 +972,7 @@ public:
+      * @param[in]  chainparams The params for the chain we want to connect to
+      * @param[out] ppindex If set, the pointer will be set to point to the last new block index object for the given headers
+      */
+-    bool ProcessNewBlockHeaders(const std::vector<CBlockHeader>& block, BlockValidationState& state, const CChainParams& chainparams, const CBlockIndex** ppindex = nullptr) LOCKS_EXCLUDED(cs_main);
++    bool ProcessNewBlockHeaders(int32_t& nPoSTemperature, const uint256& lastAcceptedHeader, const std::vector<CBlockHeader>& block, BlockValidationState& state, const CChainParams& chainparams, const CBlockIndex** ppindex = nullptr) LOCKS_EXCLUDED(cs_main);
+ 
+     /**
+      * Try to add a transaction to the memory pool.
+@@ -1013,6 +1011,12 @@ bool DumpMempool(const CTxMemPool& pool, FopenFn mockable_fopen_function = fsbri
+ /** Load the mempool from disk. */
+ bool LoadMempool(CTxMemPool& pool, CChainState& active_chainstate, FopenFn mockable_fopen_function = fsbridge::fopen);
+ 
++// peercoin:
++CAmount GetProofOfWorkReward(unsigned int nBits, uint32_t nTime);
++CAmount GetProofOfStakeReward(int64_t nCoinAge, uint32_t nTime, uint64_t nMoneySupply);
++bool GetCoinAge(const CTransaction& tx, const CCoinsViewCache &view, uint64_t& nCoinAge, unsigned int nTimeTx, bool isTrueCoinAge = true); // peercoin: get transaction coin age
++bool SignBlock(CBlock& block, const CWallet& keystore);
++bool CheckBlockSignature(const CBlock& block);
+ /**
+  * Return the expected assumeutxo value for a given height, if one exists.
+  *

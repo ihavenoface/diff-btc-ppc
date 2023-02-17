@@ -1,0 +1,71 @@
+diff --git a/src/net.h b/src/net.h
+index 2e0a45b874..729ee51259 100644
+--- a/src/net.h
++++ b/src/net.h
+@@ -17,7 +17,6 @@
+ #include <net_permissions.h>
+ #include <netaddress.h>
+ #include <netbase.h>
+-#include <policy/feerate.h>
+ #include <protocol.h>
+ #include <random.h>
+ #include <span.h>
+@@ -88,6 +87,10 @@ static constexpr bool DEFAULT_FIXEDSEEDS{true};
+ static const size_t DEFAULT_MAXRECEIVEBUFFER = 5 * 1000;
+ static const size_t DEFAULT_MAXSENDBUFFER    = 1 * 1000;
+ 
++/** peercoin: Number of consecutive PoS headers are allowed from a single peer. Used to prevent out of memory attack. */
++static const int32_t MAX_CONSECUTIVE_POS_HEADERS = 1000;
++
++// const unsigned int POW_HEADER_COOLING = 70;  - defined in protocol.cpp, so that it is visible to other files
+ typedef int64_t NodeId;
+ 
+ struct AddedNodeInfo
+@@ -243,6 +246,8 @@ struct LocalServiceInfo {
+ 
+ extern Mutex g_maplocalhost_mutex;
+ extern std::map<CNetAddr, LocalServiceInfo> mapLocalHost GUARDED_BY(g_maplocalhost_mutex);
++extern std::map<CNetAddr, int32_t> mapPoSTemperature;
++extern std::set<std::pair<COutPoint, unsigned int>> setStakeSeen;
+ 
+ extern const std::string NET_MESSAGE_COMMAND_OTHER;
+ typedef std::map<std::string, uint64_t> mapMsgCmdSize; //command, total bytes
+@@ -598,6 +603,8 @@ public:
+     /** Lowest measured round-trip time. Used as an inbound peer eviction
+      * criterium in CConnman::AttemptToEvictConnection. */
+     std::atomic<std::chrono::microseconds> m_min_ping_time{std::chrono::microseconds::max()};
++    // peercoin: used to detect branch switches
++    uint256 lastAcceptedHeader;
+ 
+     CNode(NodeId id, ServiceFlags nLocalServicesIn, std::shared_ptr<Sock> sock, const CAddress& addrIn, uint64_t nKeyedNetGroupIn, uint64_t nLocalHostNonceIn, const CAddress& addrBindIn, const std::string& addrNameIn, ConnectionType conn_type_in, bool inbound_onion);
+     CNode(const CNode&) = delete;
+@@ -959,6 +966,14 @@ public:
+     /** Return true if we should disconnect the peer for failing an inactivity check. */
+     bool ShouldRunInactivityChecks(const CNode& node, std::chrono::seconds now) const;
+ 
++    /**
++     * This is signaled when network activity should cease.
++     * A pointer to it is saved in `m_i2p_sam_session`, so make sure that
++     * the lifetime of `interruptNet` is not shorter than
++     * the lifetime of `m_i2p_sam_session`.
++     */
++    CThreadInterrupt interruptNet;
++
+ private:
+     struct ListenSocket {
+     public:
+@@ -1203,14 +1218,6 @@ private:
+     Mutex mutexMsgProc;
+     std::atomic<bool> flagInterruptMsgProc{false};
+ 
+-    /**
+-     * This is signaled when network activity should cease.
+-     * A pointer to it is saved in `m_i2p_sam_session`, so make sure that
+-     * the lifetime of `interruptNet` is not shorter than
+-     * the lifetime of `m_i2p_sam_session`.
+-     */
+-    CThreadInterrupt interruptNet;
+-
+     /**
+      * I2P SAM session.
+      * Used to accept incoming and make outgoing I2P connections.

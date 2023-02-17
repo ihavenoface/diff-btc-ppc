@@ -1,0 +1,216 @@
+diff --git a/src/txmempool.cpp b/src/txmempool.cpp
+index fb5652d0a0..2dce2c7f67 100644
+--- a/src/txmempool.cpp
++++ b/src/txmempool.cpp
+@@ -10,15 +10,17 @@
+ #include <consensus/consensus.h>
+ #include <consensus/tx_verify.h>
+ #include <consensus/validation.h>
+-#include <policy/fees.h>
++#include <kernel.h>
+ #include <policy/policy.h>
+ #include <policy/settings.h>
+ #include <reverse_iterator.h>
++#include <timedata.h>
+ #include <util/moneystr.h>
+ #include <util/system.h>
+ #include <util/time.h>
+ #include <validationinterface.h>
+ 
++#include <chainparams.h>
+ #include <cmath>
+ #include <optional>
+ 
+@@ -461,8 +463,8 @@ void CTxMemPoolEntry::UpdateAncestorState(int64_t modifySize, CAmount modifyFee,
+     assert(int(nSigOpCostWithAncestors) >= 0);
+ }
+ 
+-CTxMemPool::CTxMemPool(CBlockPolicyEstimator* estimator, int check_ratio)
+-    : m_check_ratio(check_ratio), minerPolicyEstimator(estimator)
++CTxMemPool::CTxMemPool(int check_ratio)
++    : m_check_ratio(check_ratio)
+ {
+     _clear(); //lock free clear
+ }
+@@ -483,7 +485,7 @@ void CTxMemPool::AddTransactionsUpdated(unsigned int n)
+     nTransactionsUpdated += n;
+ }
+ 
+-void CTxMemPool::addUnchecked(const CTxMemPoolEntry &entry, setEntries &setAncestors, bool validFeeEstimate)
++void CTxMemPool::addUnchecked(const CTxMemPoolEntry &entry, setEntries &setAncestors)
+ {
+     // Add to memory pool without checking anything.
+     // Used by AcceptToMemoryPool(), which DOES do
+@@ -526,10 +528,6 @@ void CTxMemPool::addUnchecked(const CTxMemPoolEntry &entry, setEntries &setAnces
+ 
+     nTransactionsUpdated++;
+     totalTxSize += entry.GetTxSize();
+-    m_total_fee += entry.GetFee();
+-    if (minerPolicyEstimator) {
+-        minerPolicyEstimator->processTransaction(entry, validFeeEstimate);
+-    }
+ 
+     vTxHashes.emplace_back(tx.GetWitnessHash(), newit);
+     newit->vTxHashesIdx = vTxHashes.size() - 1;
+@@ -549,12 +547,9 @@ void CTxMemPool::removeUnchecked(txiter it, MemPoolRemovalReason reason)
+         GetMainSignals().TransactionRemovedFromMempool(it->GetSharedTx(), reason, mempool_sequence);
+     }
+ 
+-    const uint256 hash = it->GetTx().GetHash();
+     for (const CTxIn& txin : it->GetTx().vin)
+         mapNextTx.erase(txin.prevout);
+ 
+-    RemoveUnbroadcastTx(hash, true /* add logging because unchecked */ );
+-
+     if (vTxHashes.size() > 1) {
+         vTxHashes[it->vTxHashesIdx] = std::move(vTxHashes.back());
+         vTxHashes[it->vTxHashesIdx].second->vTxHashesIdx = it->vTxHashesIdx;
+@@ -570,7 +565,6 @@ void CTxMemPool::removeUnchecked(txiter it, MemPoolRemovalReason reason)
+     cachedInnerUsage -= memusage::DynamicUsage(it->GetMemPoolParentsConst()) + memusage::DynamicUsage(it->GetMemPoolChildrenConst());
+     mapTx.erase(it);
+     nTransactionsUpdated++;
+-    if (minerPolicyEstimator) {minerPolicyEstimator->removeTx(hash, false);}
+ }
+ 
+ // Calculates descendants of entry that are not already in setDescendants, and adds to
+@@ -685,8 +679,6 @@ void CTxMemPool::removeForBlock(const std::vector<CTransactionRef>& vtx, unsigne
+         if (i != mapTx.end())
+             entries.push_back(&*i);
+     }
+-    // Before the txs in the new block have been removed from the mempool, update policy estimates
+-    if (minerPolicyEstimator) {minerPolicyEstimator->processBlock(nBlockHeight, entries);}
+     for (const auto& tx : vtx)
+     {
+         txiter it = mapTx.find(tx->GetHash());
+@@ -698,8 +690,6 @@ void CTxMemPool::removeForBlock(const std::vector<CTransactionRef>& vtx, unsigne
+         removeConflicts(*tx);
+         ClearPrioritisation(tx->GetHash());
+     }
+-    lastRollingFeeUpdate = GetTime();
+-    blockSinceLastRollingFeeBump = true;
+ }
+ 
+ void CTxMemPool::_clear()
+@@ -709,9 +699,6 @@ void CTxMemPool::_clear()
+     totalTxSize = 0;
+     m_total_fee = 0;
+     cachedInnerUsage = 0;
+-    lastRollingFeeUpdate = GetTime();
+-    blockSinceLastRollingFeeBump = false;
+-    rollingMinimumFeeRate = 0;
+     ++nTransactionsUpdated;
+ }
+ 
+@@ -812,9 +799,9 @@ void CTxMemPool::check(const CCoinsViewCache& active_coins_tip, int64_t spendhei
+         TxValidationState dummy_state; // Not used. CheckTxInputs() should always pass
+         CAmount txfee = 0;
+         assert(!tx.IsCoinBase());
+-        assert(Consensus::CheckTxInputs(tx, dummy_state, mempoolDuplicate, spendheight, txfee));
++        assert(Consensus::CheckTxInputs(tx, dummy_state, mempoolDuplicate, spendheight, txfee, Params().GetConsensus(), tx.nTime ? tx.nTime : GetAdjustedTime()));
+         for (const auto& input: tx.vin) mempoolDuplicate.SpendCoin(input.prevout);
+-        AddCoins(mempoolDuplicate, tx, std::numeric_limits<int>::max());
++        AddCoins(mempoolDuplicate, tx, std::numeric_limits<int>::max(), false, true);
+     }
+     for (auto it = mapNextTx.cbegin(); it != mapNextTx.cend(); it++) {
+         uint256 hash = it->second->GetHash();
+@@ -1016,7 +1003,7 @@ bool CCoinsViewMemPool::GetCoin(const COutPoint &outpoint, Coin &coin) const {
+     CTransactionRef ptx = mempool.get(outpoint.hash);
+     if (ptx) {
+         if (outpoint.n < ptx->vout.size()) {
+-            coin = Coin(ptx->vout[outpoint.n], MEMPOOL_HEIGHT, false);
++            coin = Coin(ptx->vout[outpoint.n], MEMPOOL_HEIGHT, false, ptx->IsCoinStake(), ptx->nTime);
+             return true;
+         } else {
+             return false;
+@@ -1028,7 +1015,7 @@ bool CCoinsViewMemPool::GetCoin(const COutPoint &outpoint, Coin &coin) const {
+ void CCoinsViewMemPool::PackageAddTransaction(const CTransactionRef& tx)
+ {
+     for (unsigned int n = 0; n < tx->vout.size(); ++n) {
+-        m_temp_added.emplace(COutPoint(tx->GetHash(), n), Coin(tx->vout[n], MEMPOOL_HEIGHT, false));
++        m_temp_added.emplace(COutPoint(tx->GetHash(), n), Coin(tx->vout[n], MEMPOOL_HEIGHT, false, tx->IsCoinStake(), tx->nTime));
+     }
+ }
+ 
+@@ -1072,13 +1059,13 @@ int CTxMemPool::Expire(std::chrono::seconds time)
+     return stage.size();
+ }
+ 
+-void CTxMemPool::addUnchecked(const CTxMemPoolEntry &entry, bool validFeeEstimate)
++void CTxMemPool::addUnchecked(const CTxMemPoolEntry &entry)
+ {
+     setEntries setAncestors;
+     uint64_t nNoLimit = std::numeric_limits<uint64_t>::max();
+     std::string dummy;
+     CalculateMemPoolAncestors(entry, setAncestors, nNoLimit, nNoLimit, nNoLimit, nNoLimit, dummy);
+-    return addUnchecked(entry, setAncestors, validFeeEstimate);
++    return addUnchecked(entry, setAncestors);
+ }
+ 
+ void CTxMemPool::UpdateChild(txiter entry, txiter child, bool add)
+@@ -1103,55 +1090,13 @@ void CTxMemPool::UpdateParent(txiter entry, txiter parent, bool add)
+     }
+ }
+ 
+-CFeeRate CTxMemPool::GetMinFee(size_t sizelimit) const {
+-    LOCK(cs);
+-    if (!blockSinceLastRollingFeeBump || rollingMinimumFeeRate == 0)
+-        return CFeeRate(llround(rollingMinimumFeeRate));
+-
+-    int64_t time = GetTime();
+-    if (time > lastRollingFeeUpdate + 10) {
+-        double halflife = ROLLING_FEE_HALFLIFE;
+-        if (DynamicMemoryUsage() < sizelimit / 4)
+-            halflife /= 4;
+-        else if (DynamicMemoryUsage() < sizelimit / 2)
+-            halflife /= 2;
+-
+-        rollingMinimumFeeRate = rollingMinimumFeeRate / pow(2.0, (time - lastRollingFeeUpdate) / halflife);
+-        lastRollingFeeUpdate = time;
+-
+-        if (rollingMinimumFeeRate < (double)incrementalRelayFee.GetFeePerK() / 2) {
+-            rollingMinimumFeeRate = 0;
+-            return CFeeRate(0);
+-        }
+-    }
+-    return std::max(CFeeRate(llround(rollingMinimumFeeRate)), incrementalRelayFee);
+-}
+-
+-void CTxMemPool::trackPackageRemoved(const CFeeRate& rate) {
+-    AssertLockHeld(cs);
+-    if (rate.GetFeePerK() > rollingMinimumFeeRate) {
+-        rollingMinimumFeeRate = rate.GetFeePerK();
+-        blockSinceLastRollingFeeBump = false;
+-    }
+-}
+-
+ void CTxMemPool::TrimToSize(size_t sizelimit, std::vector<COutPoint>* pvNoSpendsRemaining) {
+     AssertLockHeld(cs);
+ 
+     unsigned nTxnRemoved = 0;
+-    CFeeRate maxFeeRateRemoved(0);
+     while (!mapTx.empty() && DynamicMemoryUsage() > sizelimit) {
+         indexed_transaction_set::index<descendant_score>::type::iterator it = mapTx.get<descendant_score>().begin();
+ 
+-        // We set the new mempool min fee to the feerate of the removed set, plus the
+-        // "minimum reasonable fee rate" (ie some value under which we consider txn
+-        // to have 0 fee). This way, we don't allow txn to enter mempool with feerate
+-        // equal to txn which were removed with no block in between.
+-        CFeeRate removed(it->GetModFeesWithDescendants(), it->GetSizeWithDescendants());
+-        removed += incrementalRelayFee;
+-        trackPackageRemoved(removed);
+-        maxFeeRateRemoved = std::max(maxFeeRateRemoved, removed);
+-
+         setEntries stage;
+         CalculateDescendants(mapTx.project<0>(it), stage);
+         nTxnRemoved += stage.size();
+@@ -1172,10 +1117,6 @@ void CTxMemPool::TrimToSize(size_t sizelimit, std::vector<COutPoint>* pvNoSpends
+             }
+         }
+     }
+-
+-    if (maxFeeRateRemoved > CFeeRate(0)) {
+-        LogPrint(BCLog::MEMPOOL, "Removed %u txn, rolling minimum fee bumped to %s\n", nTxnRemoved, maxFeeRateRemoved.ToString());
+-    }
+ }
+ 
+ uint64_t CTxMemPool::CalculateDescendantMaximum(txiter entry) const {

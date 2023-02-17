@@ -1,0 +1,24 @@
+diff --git a/src/node/ui_interface.h b/src/node/ui_interface.h
+index d02238b549..d801129ee9 100644
+--- a/src/node/ui_interface.h
++++ b/src/node/ui_interface.h
+@@ -9,8 +9,10 @@
+ #include <functional>
+ #include <memory>
+ #include <string>
++#include <util/ui_change_type.h>
+ 
+ class CBlockIndex;
++class uint256;
+ enum class SynchronizationState;
+ struct bilingual_str;
+ 
+@@ -93,7 +95,7 @@ public:
+     /**
+      * Status bar alerts changed.
+      */
+-    ADD_SIGNALS_DECL_WRAPPER(NotifyAlertChanged, void, );
++    ADD_SIGNALS_DECL_WRAPPER(NotifyAlertChanged, void, const uint256 &hash, ChangeType status);
+ 
+     /**
+      * Show progress e.g. for verifychain.

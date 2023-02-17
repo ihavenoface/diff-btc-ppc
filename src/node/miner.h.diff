@@ -1,0 +1,82 @@
+diff --git a/src/node/miner.h b/src/node/miner.h
+index c96da874a7..2beb5b220b 100644
+--- a/src/node/miner.h
++++ b/src/node/miner.h
+@@ -8,15 +8,18 @@
+ 
+ #include <primitives/block.h>
+ #include <txmempool.h>
+-
++#include <node/context.h>
+ #include <memory>
+ #include <optional>
+ #include <stdint.h>
++#include <wallet/wallet.h>
+ 
+ #include <boost/multi_index/ordered_index.hpp>
+ #include <boost/multi_index_container.hpp>
+ 
++extern int64_t nLastCoinStakeSearchInterval;
+ class ChainstateManager;
++
+ class CBlockIndex;
+ class CChainParams;
+ class CScript;
+@@ -134,7 +137,6 @@ private:
+     // Configuration parameters for the block size
+     bool fIncludeWitness;
+     unsigned int nBlockMaxWeight;
+-    CFeeRate blockMinFeeRate;
+ 
+     // Information on the current status of the block
+     uint64_t nBlockWeight;
+@@ -155,14 +157,14 @@ public:
+     struct Options {
+         Options();
+         size_t nBlockMaxWeight;
+-        CFeeRate blockMinFeeRate;
+     };
+ 
+     explicit BlockAssembler(CChainState& chainstate, const CTxMemPool& mempool, const CChainParams& params);
+     explicit BlockAssembler(CChainState& chainstate, const CTxMemPool& mempool, const CChainParams& params, const Options& options);
+ 
+     /** Construct a new block template with coinbase to scriptPubKeyIn */
+-    std::unique_ptr<CBlockTemplate> CreateNewBlock(const CScript& scriptPubKeyIn);
++    std::unique_ptr<CBlockTemplate> CreateNewBlock(const CScript& scriptPubKeyIn, CWallet* pwallet=nullptr, bool* pfPoSCancel=nullptr, NodeContext* m_node=nullptr);
++    //std::unique_ptr<CBlockTemplate> CreateNewBlock(const CScript& scriptPubKeyIn);
+ 
+     inline static std::optional<int64_t> m_last_block_num_txs{};
+     inline static std::optional<int64_t> m_last_block_weight{};
+@@ -178,7 +180,7 @@ private:
+     /** Add transactions based on feerate including unconfirmed ancestors
+       * Increments nPackagesSelected / nDescendantsUpdated with corresponding
+       * statistics from the package selection (for logging statistics). */
+-    void addPackageTxs(int& nPackagesSelected, int& nDescendantsUpdated) EXCLUSIVE_LOCKS_REQUIRED(m_mempool.cs);
++    void addPackageTxs(int& nPackagesSelected, int& nDescendantsUpdated, uint32_t nTime) EXCLUSIVE_LOCKS_REQUIRED(m_mempool.cs);
+ 
+     // helper functions for addPackageTxs()
+     /** Remove confirmed (inBlock) entries from given set */
+@@ -189,7 +191,7 @@ private:
+       * locktime, premature-witness, serialized size (if necessary)
+       * These checks should always succeed, and they're here
+       * only as an extra check in case of suboptimal node configuration */
+-    bool TestPackageTransactions(const CTxMemPool::setEntries& package) const;
++    bool TestPackageTransactions(const CTxMemPool::setEntries& package, uint32_t nTime) const;
+     /** Return true if given transaction from mapTx has already been evaluated,
+       * or if the transaction's cached data in mapTx is incorrect. */
+     bool SkipMapTxEntry(CTxMemPool::txiter it, indexed_modified_transaction_set& mapModifiedTx, CTxMemPool::setEntries& failedTx) EXCLUSIVE_LOCKS_REQUIRED(m_mempool.cs);
+@@ -203,7 +205,13 @@ private:
+ 
+ /** Modify the extranonce in a block */
+ void IncrementExtraNonce(CBlock* pblock, const CBlockIndex* pindexPrev, unsigned int& nExtraNonce);
+-int64_t UpdateTime(CBlockHeader* pblock, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev);
++int64_t UpdateTime(CBlockHeader* pblock);
++
++namespace boost {
++    class thread_group;
++} // namespace boost
++
++void MintStake(std::shared_ptr<CWallet> pwallet, NodeContext& m_node);
+ 
+ /** Update an old GenerateCoinbaseCommitment from CreateNewBlock after the block txs have changed */
+ void RegenerateCommitments(CBlock& block, ChainstateManager& chainman);

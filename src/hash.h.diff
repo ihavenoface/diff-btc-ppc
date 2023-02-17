@@ -1,0 +1,12 @@
+diff --git a/src/hash.h b/src/hash.h
+index 9f582842c1..56deebfcc9 100644
+--- a/src/hash.h
++++ b/src/hash.h
+@@ -212,4 +212,7 @@ void BIP32Hash(const ChainCode &chainCode, unsigned int nChild, unsigned char he
+  */
+ CHashWriter TaggedHash(const std::string& tag);
+ 
++extern int32_t peercoinRandseed;
++int univHash(const uint256 &x);
++
+ #endif // BITCOIN_HASH_H

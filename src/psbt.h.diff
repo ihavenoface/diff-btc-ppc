@@ -1,0 +1,12 @@
+diff --git a/src/psbt.h b/src/psbt.h
+index f0ceb02481..a78d6d6a73 100644
+--- a/src/psbt.h
++++ b/src/psbt.h
+@@ -7,7 +7,6 @@
+ 
+ #include <attributes.h>
+ #include <node/transaction.h>
+-#include <policy/feerate.h>
+ #include <primitives/transaction.h>
+ #include <pubkey.h>
+ #include <script/keyorigin.h>

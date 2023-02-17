@@ -1,0 +1,13 @@
+diff --git a/src/util/moneystr.cpp b/src/util/moneystr.cpp
+index 2cd7a426f8..17255ee0e2 100644
+--- a/src/util/moneystr.cpp
++++ b/src/util/moneystr.cpp
+@@ -23,7 +23,7 @@ std::string FormatMoney(const CAmount n)
+         quotient = -quotient;
+         remainder = -remainder;
+     }
+-    std::string str = strprintf("%d.%08d", quotient, remainder);
++    std::string str = strprintf("%d.%06d", quotient, remainder);
+ 
+     // Right-trim excess zeros before the decimal point:
+     int nTrim = 0;

@@ -1,0 +1,110 @@
+diff --git a/src/interfaces/wallet.h b/src/interfaces/wallet.h
+index f26ac866dc..99facea997 100644
+--- a/src/interfaces/wallet.h
++++ b/src/interfaces/wallet.h
+@@ -24,7 +24,6 @@
+ #include <utility>
+ #include <vector>
+ 
+-class CFeeRate;
+ class CKey;
+ enum class FeeReason;
+ enum class OutputType;
+@@ -156,26 +155,6 @@ public:
+     //! Abandon transaction.
+     virtual bool abandonTransaction(const uint256& txid) = 0;
+ 
+-    //! Return whether transaction can be bumped.
+-    virtual bool transactionCanBeBumped(const uint256& txid) = 0;
+-
+-    //! Create bump transaction.
+-    virtual bool createBumpTransaction(const uint256& txid,
+-        const wallet::CCoinControl& coin_control,
+-        std::vector<bilingual_str>& errors,
+-        CAmount& old_fee,
+-        CAmount& new_fee,
+-        CMutableTransaction& mtx) = 0;
+-
+-    //! Sign bump transaction.
+-    virtual bool signBumpTransaction(CMutableTransaction& mtx) = 0;
+-
+-    //! Commit bump transaction.
+-    virtual bool commitBumpTransaction(const uint256& txid,
+-        CMutableTransaction&& mtx,
+-        std::vector<bilingual_str>& errors,
+-        uint256& bumped_txid) = 0;
+-
+     //! Get a transaction.
+     virtual CTransactionRef getTx(const uint256& txid) = 0;
+ 
+@@ -237,7 +216,7 @@ public:
+ 
+     //! Return wallet transaction output information.
+     virtual std::vector<WalletTxOut> getCoins(const std::vector<COutPoint>& outputs) = 0;
+-
++/*
+     //! Get required fee.
+     virtual CAmount getRequiredFee(unsigned int tx_bytes) = 0;
+ 
+@@ -249,7 +228,7 @@ public:
+ 
+     //! Get tx confirm target.
+     virtual unsigned int getConfirmTarget() = 0;
+-
++*/
+     // Return whether HD enabled.
+     virtual bool hdEnabled() = 0;
+ 
+@@ -268,9 +247,6 @@ public:
+     // Get default address type.
+     virtual OutputType getDefaultAddressType() = 0;
+ 
+-    //! Get max tx fee.
+-    virtual CAmount getDefaultMaxTxFee() = 0;
+-
+     // Remove wallet.
+     virtual void remove() = 0;
+ 
+@@ -311,6 +287,9 @@ public:
+ 
+     //! Return pointer to internal wallet class, useful for testing.
+     virtual wallet::CWallet* wallet() { return nullptr; }
++    // peercoin
++    virtual void relockWalletAfterDuration(int nDuration) = 0;
++    virtual std::shared_ptr<wallet::CWallet> getWallet() = 0;
+ };
+ 
+ //! Wallet chain client that in addition to having chain client methods for
+@@ -365,6 +344,7 @@ struct WalletAddress
+ struct WalletBalances
+ {
+     CAmount balance = 0;
++    CAmount stake = 0;
+     CAmount unconfirmed_balance = 0;
+     CAmount immature_balance = 0;
+     bool have_watch_only = false;
+@@ -374,7 +354,7 @@ struct WalletBalances
+ 
+     bool balanceChanged(const WalletBalances& prev) const
+     {
+-        return balance != prev.balance || unconfirmed_balance != prev.unconfirmed_balance ||
++        return balance != prev.balance || stake != prev.stake || unconfirmed_balance != prev.unconfirmed_balance ||
+                immature_balance != prev.immature_balance || watch_only_balance != prev.watch_only_balance ||
+                unconfirmed_watch_only_balance != prev.unconfirmed_watch_only_balance ||
+                immature_watch_only_balance != prev.immature_watch_only_balance;
+@@ -395,6 +375,7 @@ struct WalletTx
+     int64_t time;
+     std::map<std::string, std::string> value_map;
+     bool is_coinbase;
++    bool is_coinstake;
+ };
+ 
+ //! Updated transaction status.
+@@ -408,6 +389,7 @@ struct WalletTxStatus
+     bool is_trusted;
+     bool is_abandoned;
+     bool is_coinbase;
++    bool is_coinstake;
+     bool is_in_main_chain;
+ };
+ 

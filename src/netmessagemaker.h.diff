@@ -1,0 +1,13 @@
+diff --git a/src/netmessagemaker.h b/src/netmessagemaker.h
+index 89fb4758f9..640de626bf 100644
+--- a/src/netmessagemaker.h
++++ b/src/netmessagemaker.h
+@@ -19,7 +19,7 @@ public:
+     {
+         CSerializedNetMsg msg;
+         msg.m_type = std::move(msg_type);
+-        CVectorWriter{ SER_NETWORK, nFlags | nVersion, msg.data, 0, std::forward<Args>(args)... };
++        CVectorWriter{ SER_NETWORK | SER_POSMARKER, nFlags | nVersion, msg.data, 0, std::forward<Args>(args)... };
+         return msg;
+     }
+ 

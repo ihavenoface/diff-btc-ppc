@@ -1,0 +1,12 @@
+diff --git a/src/node/context.cpp b/src/node/context.cpp
+index 893c32f1bc..9e27d14217 100644
+--- a/src/node/context.cpp
++++ b/src/node/context.cpp
+@@ -9,7 +9,6 @@
+ #include <interfaces/chain.h>
+ #include <net.h>
+ #include <net_processing.h>
+-#include <policy/fees.h>
+ #include <scheduler.h>
+ #include <txmempool.h>
+ #include <validation.h>
