@@ -1,0 +1,122 @@
+diff --git a/src/consensus/tx_verify.cpp b/src/consensus/tx_verify.cpp
+index 5738c333ce..0a232c587e 100644
+--- a/src/consensus/tx_verify.cpp
++++ b/src/consensus/tx_verify.cpp
+@@ -1,16 +1,19 @@
+ // Copyright (c) 2017-2021 The Bitcoin Core developers
+ // Distributed under the MIT software license, see the accompanying
+ // file COPYING or http://www.opensource.org/licenses/mit-license.php.
+ 
+ #include <consensus/tx_verify.h>
+ 
+ #include <chain.h>
+ #include <coins.h>
+ #include <consensus/amount.h>
+ #include <consensus/consensus.h>
+ #include <consensus/validation.h>
+ #include <primitives/transaction.h>
+ #include <script/interpreter.h>
++#include <kernel.h>
++#include <validation.h>   // GetCoinAge()
++
+ #include <util/moneystr.h>
+ 
+ bool IsFinalTx(const CTransaction &tx, int nBlockHeight, int64_t nBlockTime)
+@@ -164,45 +167,83 @@ int64_t GetTransactionSigOpCost(const CTransaction& tx, const CCoinsViewCache& i
+     return nSigOps;
+ }
+ 
+-bool Consensus::CheckTxInputs(const CTransaction& tx, TxValidationState& state, const CCoinsViewCache& inputs, int nSpendHeight, CAmount& txfee)
++bool Consensus::CheckTxInputs(const CTransaction& tx, TxValidationState& state, const CCoinsViewCache& inputs, int nSpendHeight, CAmount& txfee, const Consensus::Params& params, unsigned int nTimeTx, uint64_t nMoneySupply)
+ {
+     // are the actual inputs available?
+     if (!inputs.HaveInputs(tx)) {
+         return state.Invalid(TxValidationResult::TX_MISSING_INPUTS, "bad-txns-inputs-missingorspent",
+                          strprintf("%s: inputs missing/spent", __func__));
+     }
+ 
+     CAmount nValueIn = 0;
+     for (unsigned int i = 0; i < tx.vin.size(); ++i) {
+         const COutPoint &prevout = tx.vin[i].prevout;
+         const Coin& coin = inputs.AccessCoin(prevout);
+         assert(!coin.IsSpent());
+ 
+         // If prev is coinbase, check that it's matured
+-        if (coin.IsCoinBase() && nSpendHeight - coin.nHeight < COINBASE_MATURITY) {
+-            return state.Invalid(TxValidationResult::TX_PREMATURE_SPEND, "bad-txns-premature-spend-of-coinbase",
++        if ((coin.IsCoinBase() || coin.IsCoinStake()) && nSpendHeight - coin.nHeight < params.nCoinbaseMaturity) {
++            return state.Invalid(TxValidationResult::TX_PREMATURE_SPEND, "bad-txns-premature-spend-of-coinbase/coinstake",
+                 strprintf("tried to spend coinbase at depth %d", nSpendHeight - coin.nHeight));
+         }
+ 
++        // peercoin: check transaction timestamp
++        if (coin.nTime > nTimeTx)
++            return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-spent-too-early", strprintf("%s : transaction timestamp earlier than input transaction", __func__));
++
+         // Check for negative or overflow input values
+         nValueIn += coin.out.nValue;
+         if (!MoneyRange(coin.out.nValue) || !MoneyRange(nValueIn)) {
+             return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-inputvalues-outofrange");
+         }
+     }
+ 
+-    const CAmount value_out = tx.GetValueOut();
+-    if (nValueIn < value_out) {
+-        return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-in-belowout",
+-            strprintf("value in (%s) < value out (%s)", FormatMoney(nValueIn), FormatMoney(value_out)));
++    if (tx.IsCoinStake())
++    {
++        // peercoin: coin stake tx earns reward instead of paying fee
++        uint64_t nCoinAge;
++        if (!GetCoinAge(tx, inputs, nCoinAge, nTimeTx))
++            return state.Invalid(TxValidationResult::TX_CONSENSUS, "unable to get coin age for coinstake");
++        CAmount nStakeReward = tx.GetValueOut() - nValueIn;
++        CAmount nCoinstakeCost = (GetMinFee(tx, nTimeTx) < PERKB_TX_FEE) ? 0 : (GetMinFee(tx, nTimeTx) - PERKB_TX_FEE);
++        if (nMoneySupply && nStakeReward > GetProofOfStakeReward(nCoinAge, nTimeTx, nMoneySupply) - nCoinstakeCost)
++            return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-coinstake-too-large");
+     }
+-
+-    // Tally transaction fees
+-    const CAmount txfee_aux = nValueIn - value_out;
+-    if (!MoneyRange(txfee_aux)) {
+-        return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-fee-outofrange");
++    else
++    {
++        const CAmount value_out = tx.GetValueOut();
++        if (nValueIn < value_out) {
++            return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-in-belowout",
++                strprintf("value in (%s) < value out (%s)", FormatMoney(nValueIn), FormatMoney(value_out)));
++        }
++        // Tally transaction fees
++        const CAmount txfee_aux = nValueIn - value_out;
++        if (!MoneyRange(txfee_aux)) {
++            return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-fee-outofrange");
++        }
++        // peercoin: enforce transaction fees for every block
++        if (txfee_aux < GetMinFee(tx, nTimeTx))
++            return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-fee-not-enough");
++        txfee = txfee_aux;
+     }
+-
+-    txfee = txfee_aux;
+     return true;
+ }
++
++CAmount GetMinFee(const CTransaction& tx, unsigned int nTimeTx)
++{
++    size_t nBytes = ::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION);
++    return GetMinFee(nBytes, nTimeTx);
++}
++
++CAmount GetMinFee(size_t nBytes, uint32_t nTime)
++{
++    CAmount nMinFee;
++    if (IsProtocolV07(nTime) || !nTime) // RFC-0007
++        nMinFee = (nBytes < 100) ? MIN_TX_FEE : (CAmount)(nBytes * (PERKB_TX_FEE / 1000));
++    else
++        nMinFee = (1 + (CAmount)nBytes / 1000) * PERKB_TX_FEE;
++
++    if (!MoneyRange(nMinFee))
++        nMinFee = MAX_MONEY;
++    return nMinFee;
++}

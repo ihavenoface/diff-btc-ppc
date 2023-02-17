@@ -1,0 +1,33 @@
+diff --git a/src/node/psbt.h b/src/node/psbt.h
+index cbb3bd8201..87eb632b4c 100644
+--- a/src/node/psbt.h
++++ b/src/node/psbt.h
+@@ -27,28 +27,26 @@ struct PSBTInputAnalysis {
+ /**
+  * Holds the results of AnalyzePSBT (miscellaneous information about a PSBT)
+  */
+ struct PSBTAnalysis {
+     std::optional<size_t> estimated_vsize;      //!< Estimated weight of the transaction
+-    std::optional<CFeeRate> estimated_feerate;  //!< Estimated feerate (fee / weight) of the transaction
+     std::optional<CAmount> fee;                 //!< Amount of fee being paid by the transaction
+     std::vector<PSBTInputAnalysis> inputs;      //!< More information about the individual inputs of the transaction
+     PSBTRole next;                              //!< Which of the BIP 174 roles needs to handle the transaction next
+     std::string error;                          //!< Error message
+ 
+     void SetInvalid(std::string err_msg)
+     {
+         estimated_vsize = std::nullopt;
+-        estimated_feerate = std::nullopt;
+         fee = std::nullopt;
+         inputs.clear();
+         next = PSBTRole::CREATOR;
+         error = err_msg;
+     }
+ };
+ 
+ /**
+  * Provides helpful miscellaneous information about where a PSBT is in the signing workflow.
+  *
+  * @param[in] psbtx the PSBT to analyze
+  * @return A PSBTAnalysis with information about the provided PSBT.
+  */

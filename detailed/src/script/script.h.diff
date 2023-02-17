@@ -1,0 +1,198 @@
+diff --git a/src/script/script.h b/src/script/script.h
+index 8b7a7bb7b3..34888ead48 100644
+--- a/src/script/script.h
++++ b/src/script/script.h
+@@ -1,25 +1,27 @@
+ // Copyright (c) 2009-2010 Satoshi Nakamoto
+ // Copyright (c) 2009-2021 The Bitcoin Core developers
+ // Distributed under the MIT software license, see the accompanying
+ // file COPYING or http://www.opensource.org/licenses/mit-license.php.
+ 
+ #ifndef BITCOIN_SCRIPT_SCRIPT_H
+ #define BITCOIN_SCRIPT_SCRIPT_H
+ 
+ #include <attributes.h>
+ #include <crypto/common.h>
+ #include <prevector.h>
+ #include <serialize.h>
+ 
+ #include <assert.h>
+ #include <climits>
+ #include <limits>
+ #include <stdexcept>
+ #include <stdint.h>
+ #include <string.h>
+ #include <string>
+ #include <vector>
+ 
++class CPubKey;
++
+ // Maximum number of bytes pushable to the stack
+ static const unsigned int MAX_SCRIPT_ELEMENT_SIZE = 520;
+ 
+@@ -219,11 +221,11 @@ public:
+ class CScriptNum
+ {
+ /**
+  * Numeric opcodes (OP_1ADD, etc) are restricted to operating on 4-byte integers.
+  * The semantics are subtle, though: operands must be in the range [-2^31 +1...2^31 -1],
+  * but results may overflow (and are valid as long as they are not used in a subsequent
+  * numeric operation). CScriptNum enforces those semantics by storing results as
+- * an int64 and allowing out-of-range values to be returned as a vector of bytes but
++ * an int64_t and allowing out-of-range values to be returned as a vector of bytes but
+  * throwing an exception if arithmetic is done or the result is interpreted as an integer.
+  */
+ public:
+@@ -408,150 +410,152 @@ protected:
+     CScript& push_int64(int64_t n)
+     {
+         if (n == -1 || (n >= 1 && n <= 16))
+         {
+             push_back(n + (OP_1 - 1));
+         }
+         else if (n == 0)
+         {
+             push_back(OP_0);
+         }
+         else
+         {
+             *this << CScriptNum::serialize(n);
+         }
+         return *this;
+     }
+ public:
+     CScript() { }
+     CScript(const_iterator pbegin, const_iterator pend) : CScriptBase(pbegin, pend) { }
+     CScript(std::vector<unsigned char>::const_iterator pbegin, std::vector<unsigned char>::const_iterator pend) : CScriptBase(pbegin, pend) { }
+     CScript(const unsigned char* pbegin, const unsigned char* pend) : CScriptBase(pbegin, pend) { }
+ 
+     SERIALIZE_METHODS(CScript, obj) { READWRITEAS(CScriptBase, obj); }
+ 
+     explicit CScript(int64_t b) { operator<<(b); }
+     explicit CScript(opcodetype b)     { operator<<(b); }
+     explicit CScript(const CScriptNum& b) { operator<<(b); }
+     // delete non-existent constructor to defend against future introduction
+     // e.g. via prevector
+     explicit CScript(const std::vector<unsigned char>& b) = delete;
+ 
+     /** Delete non-existent operator to defend against future introduction */
+     CScript& operator<<(const CScript& b) = delete;
+ 
+     CScript& operator<<(int64_t b) LIFETIMEBOUND { return push_int64(b); }
+ 
+     CScript& operator<<(opcodetype opcode) LIFETIMEBOUND
+     {
+         if (opcode < 0 || opcode > 0xff)
+             throw std::runtime_error("CScript::operator<<(): invalid opcode");
+         insert(end(), (unsigned char)opcode);
+         return *this;
+     }
+ 
+     CScript& operator<<(const CScriptNum& b) LIFETIMEBOUND
+     {
+         *this << b.getvch();
+         return *this;
+     }
+ 
+     CScript& operator<<(const std::vector<unsigned char>& b) LIFETIMEBOUND
+     {
+         if (b.size() < OP_PUSHDATA1)
+         {
+             insert(end(), (unsigned char)b.size());
+         }
+         else if (b.size() <= 0xff)
+         {
+             insert(end(), OP_PUSHDATA1);
+             insert(end(), (unsigned char)b.size());
+         }
+         else if (b.size() <= 0xffff)
+         {
+             insert(end(), OP_PUSHDATA2);
+             uint8_t _data[2];
+             WriteLE16(_data, b.size());
+             insert(end(), _data, _data + sizeof(_data));
+         }
+         else
+         {
+             insert(end(), OP_PUSHDATA4);
+             uint8_t _data[4];
+             WriteLE32(_data, b.size());
+             insert(end(), _data, _data + sizeof(_data));
+         }
+         insert(end(), b.begin(), b.end());
+         return *this;
+     }
+ 
+     bool GetOp(const_iterator& pc, opcodetype& opcodeRet, std::vector<unsigned char>& vchRet) const
+     {
+         return GetScriptOp(pc, end(), opcodeRet, &vchRet);
+     }
+ 
+     bool GetOp(const_iterator& pc, opcodetype& opcodeRet) const
+     {
+         return GetScriptOp(pc, end(), opcodeRet, nullptr);
+     }
+ 
+     /** Encode/decode small integers: */
+     static int DecodeOP_N(opcodetype opcode)
+     {
+         if (opcode == OP_0)
+             return 0;
+         assert(opcode >= OP_1 && opcode <= OP_16);
+         return (int)opcode - (int)(OP_1 - 1);
+     }
+     static opcodetype EncodeOP_N(int n)
+     {
+         assert(n >= 0 && n <= 16);
+         if (n == 0)
+             return OP_0;
+         return (opcodetype)(OP_1+n-1);
+     }
+ 
+     /**
+      * Pre-version-0.6, Bitcoin always counted CHECKMULTISIGs
+      * as 20 sigops. With pay-to-script-hash, that changed:
+      * CHECKMULTISIGs serialized in scriptSigs are
+      * counted more accurately, assuming they are of the form
+      *  ... OP_N CHECKMULTISIG ...
+      */
+     unsigned int GetSigOpCount(bool fAccurate) const;
+ 
+     /**
+      * Accurately count sigOps, including sigOps in
+      * pay-to-script-hash transactions:
+      */
+     unsigned int GetSigOpCount(const CScript& scriptSig) const;
+ 
+     bool IsPayToScriptHash() const;
+     bool IsPayToWitnessScriptHash() const;
+     bool IsWitnessProgram(int& version, std::vector<unsigned char>& program) const;
+ 
+     /** Called by IsStandardTx and P2SH/BIP62 VerifyScript (which makes it consensus-critical). */
+     bool IsPushOnly(const_iterator pc) const;
+     bool IsPushOnly() const;
+ 
+     /** Check if the script contains valid OP_CODES */
+     bool HasValidOps() const;
+ 
+     /**
+      * Returns whether the script is guaranteed to fail at execution,
+      * regardless of the initial stack. This allows outputs to be pruned
+      * instantly when entering the UTXO set.
+      */
+     bool IsUnspendable() const
+     {
+         return (size() > 0 && *begin() == OP_RETURN) || (size() > MAX_SCRIPT_SIZE);
+     }
+ 
+     void clear()
+     {
+         // The default prevector::clear() does not release memory
+         CScriptBase::clear();
+         shrink_to_fit();
+     }
++
++    void SetMultisig(int nRequired, const std::vector<CPubKey>& keys);
+ };
+ 
+ struct CScriptWitness

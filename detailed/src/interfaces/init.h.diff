@@ -1,0 +1,33 @@
+diff --git a/src/interfaces/init.h b/src/interfaces/init.h
+index 2153076366..64f4cd8f45 100644
+--- a/src/interfaces/init.h
++++ b/src/interfaces/init.h
+@@ -1,11 +1,14 @@
+ // Copyright (c) 2021 The Bitcoin Core developers
+ // Distributed under the MIT software license, see the accompanying
+ // file COPYING or http://www.opensource.org/licenses/mit-license.php.
+ 
+ #ifndef BITCOIN_INTERFACES_INIT_H
+ #define BITCOIN_INTERFACES_INIT_H
+ 
+ #include <memory>
++#include <interfaces/wallet.h>
++
++using interfaces::WalletLoader;
+ 
+ namespace node {
+ struct NodeContext;
+@@ -16,12 +19,12 @@ class Chain;
+ class Echo;
+ class Ipc;
+ class Node;
+-class WalletLoader;
++//class WalletLoader;
+ 
+ //! Initial interface created when a process is first started, and used to give
+ //! and get access to other interfaces (Node, Chain, Wallet, etc).
+ //!
+ //! There is a different Init interface implementation for each process
+ //! (bitcoin-gui, bitcoin-node, bitcoin-wallet, bitcoind, bitcoin-qt) and each
+ //! implementation can implement the make methods for interfaces it supports.
+ //! The default make methods all return null.

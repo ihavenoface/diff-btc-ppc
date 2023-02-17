@@ -1,0 +1,51 @@
+diff --git a/src/protocol.h b/src/protocol.h
+index fdeaa9a9c5..9ab533ca03 100644
+--- a/src/protocol.h
++++ b/src/protocol.h
+@@ -270,37 +270,37 @@ const std::vector<std::string>& getAllNetMessageTypes();
+ /** nServices flags */
+ enum ServiceFlags : uint64_t {
+     // NOTE: When adding here, be sure to update serviceFlagToStr too
+     // Nothing
+     NODE_NONE = 0,
+     // NODE_NETWORK means that the node is capable of serving the complete block chain. It is currently
+-    // set by all Bitcoin Core non pruned nodes, and is unset by SPV clients or other light clients.
++    // set by all Bitcoin Core nodes, and is unset by SPV clients or other light clients.
+     NODE_NETWORK = (1 << 0),
+     // NODE_BLOOM means the node is capable and willing to handle bloom-filtered connections.
+     // Bitcoin Core nodes used to support this by default, without advertising this bit,
+     // but no longer do as of protocol version 70011 (= NO_BLOOM_VERSION)
+     NODE_BLOOM = (1 << 2),
+     // NODE_WITNESS indicates that a node can be asked for blocks and transactions including
+     // witness data.
+     NODE_WITNESS = (1 << 3),
+     // NODE_COMPACT_FILTERS means the node will service basic block filter requests.
+     // See BIP157 and BIP158 for details on how this is implemented.
+     NODE_COMPACT_FILTERS = (1 << 6),
+     // NODE_NETWORK_LIMITED means the same as NODE_NETWORK with the limitation of only
+     // serving the last 288 (2 day) blocks
+     // See BIP159 for details on how this is implemented.
+     NODE_NETWORK_LIMITED = (1 << 10),
+ 
+     // Bits 24-31 are reserved for temporary experiments. Just pick a bit that
+     // isn't getting used, or one not being used much, and notify the
+     // bitcoin-development mailing list. Remember that service bits are just
+     // unauthenticated advertisements, so your code must be robust against
+     // collisions and other cases where nodes may be advertising a service they
+     // do not actually support. Other service bits should be allocated via the
+     // BIP process.
+ };
+ 
+ /**
+  * Convert service flags (a bitmask of NODE_*) to human readable strings.
+  * It supports unknown service flags which will be returned as "UNKNOWN[...]".
+  * @param[in] flags multiple NODE_* bitwise-OR-ed together
+  */
+@@ -511,4 +511,7 @@ public:
+ /** Convert a TX/WITNESS_TX/WTX CInv to a GenTxid. */
+ GenTxid ToGenTxid(const CInv& inv);
+ 
++/** peercoin: How much temperature a PoW header will remove */
++extern const unsigned int POW_HEADER_COOLING;
++
+ #endif // BITCOIN_PROTOCOL_H

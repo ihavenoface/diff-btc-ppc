@@ -1,0 +1,14 @@
+diff --git a/src/util/message.cpp b/src/util/message.cpp
+index 2c7f0406f0..873e06b130 100644
+--- a/src/util/message.cpp
++++ b/src/util/message.cpp
+@@ -18,8 +18,8 @@
+ /**
+  * Text used to signify that a signed message follows and to prevent
+  * inadvertently signing a transaction.
+  */
+-const std::string MESSAGE_MAGIC = "Bitcoin Signed Message:\n";
++const std::string MESSAGE_MAGIC = "Peercoin Signed Message:\n";
+ 
+ MessageVerificationResult MessageVerify(
+     const std::string& address,

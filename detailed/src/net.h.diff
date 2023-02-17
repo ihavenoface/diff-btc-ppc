@@ -1,0 +1,684 @@
+diff --git a/src/net.h b/src/net.h
+index 2e0a45b874..729ee51259 100644
+--- a/src/net.h
++++ b/src/net.h
+@@ -1,41 +1,40 @@
+ // Copyright (c) 2009-2010 Satoshi Nakamoto
+ // Copyright (c) 2009-2021 The Bitcoin Core developers
+ // Distributed under the MIT software license, see the accompanying
+ // file COPYING or http://www.opensource.org/licenses/mit-license.php.
+ 
+ #ifndef BITCOIN_NET_H
+ #define BITCOIN_NET_H
+ 
+ #include <chainparams.h>
+ #include <common/bloom.h>
+ #include <compat.h>
+ #include <consensus/amount.h>
+ #include <crypto/siphash.h>
+ #include <hash.h>
+ #include <i2p.h>
+ #include <logging.h>
+ #include <net_permissions.h>
+ #include <netaddress.h>
+ #include <netbase.h>
+-#include <policy/feerate.h>
+ #include <protocol.h>
+ #include <random.h>
+ #include <span.h>
+ #include <streams.h>
+ #include <sync.h>
+ #include <threadinterrupt.h>
+ #include <uint256.h>
+ #include <util/check.h>
+ #include <util/sock.h>
+ 
+ #include <atomic>
+ #include <condition_variable>
+ #include <cstdint>
+ #include <deque>
+ #include <functional>
+ #include <list>
+ #include <map>
+ #include <memory>
+ #include <optional>
+ #include <thread>
+ #include <vector>
+@@ -88,6 +87,10 @@ static constexpr bool DEFAULT_FIXEDSEEDS{true};
+ static const size_t DEFAULT_MAXRECEIVEBUFFER = 5 * 1000;
+ static const size_t DEFAULT_MAXSENDBUFFER    = 1 * 1000;
+ 
++/** peercoin: Number of consecutive PoS headers are allowed from a single peer. Used to prevent out of memory attack. */
++static const int32_t MAX_CONSECUTIVE_POS_HEADERS = 1000;
++
++// const unsigned int POW_HEADER_COOLING = 70;  - defined in protocol.cpp, so that it is visible to other files
+ typedef int64_t NodeId;
+ 
+ struct AddedNodeInfo
+@@ -243,6 +246,8 @@ struct LocalServiceInfo {
+ 
+ extern Mutex g_maplocalhost_mutex;
+ extern std::map<CNetAddr, LocalServiceInfo> mapLocalHost GUARDED_BY(g_maplocalhost_mutex);
++extern std::map<CNetAddr, int32_t> mapPoSTemperature;
++extern std::set<std::pair<COutPoint, unsigned int>> setStakeSeen;
+ 
+ extern const std::string NET_MESSAGE_COMMAND_OTHER;
+ typedef std::map<std::string, uint64_t> mapMsgCmdSize; //command, total bytes
+@@ -410,279 +415,281 @@ class CNode
+ public:
+     std::unique_ptr<TransportDeserializer> m_deserializer;
+     std::unique_ptr<TransportSerializer> m_serializer;
+ 
+     NetPermissionFlags m_permissionFlags{NetPermissionFlags::None};
+     std::atomic<ServiceFlags> nServices{NODE_NONE};
+ 
+     /**
+      * Socket used for communication with the node.
+      * May not own a Sock object (after `CloseSocketDisconnect()` or during tests).
+      * `shared_ptr` (instead of `unique_ptr`) is used to avoid premature close of
+      * the underlying file descriptor by one thread while another thread is
+      * poll(2)-ing it for activity.
+      * @see https://github.com/bitcoin/bitcoin/issues/21744 for details.
+      */
+     std::shared_ptr<Sock> m_sock GUARDED_BY(m_sock_mutex);
+ 
+     /** Total size of all vSendMsg entries */
+     size_t nSendSize GUARDED_BY(cs_vSend){0};
+     /** Offset inside the first vSendMsg already sent */
+     size_t nSendOffset GUARDED_BY(cs_vSend){0};
+     uint64_t nSendBytes GUARDED_BY(cs_vSend){0};
+     std::deque<std::vector<unsigned char>> vSendMsg GUARDED_BY(cs_vSend);
+     Mutex cs_vSend;
+     Mutex m_sock_mutex;
+     Mutex cs_vRecv;
+ 
+     RecursiveMutex cs_vProcessMsg;
+     std::list<CNetMessage> vProcessMsg GUARDED_BY(cs_vProcessMsg);
+     size_t nProcessQueueSize{0};
+ 
+     RecursiveMutex cs_sendProcessing;
+ 
+     uint64_t nRecvBytes GUARDED_BY(cs_vRecv){0};
+ 
+     std::atomic<std::chrono::seconds> m_last_send{0s};
+     std::atomic<std::chrono::seconds> m_last_recv{0s};
+     //! Unix epoch time at peer connection
+     const std::chrono::seconds m_connected;
+     std::atomic<int64_t> nTimeOffset{0};
+     // Address of this peer
+     const CAddress addr;
+     // Bind address of our side of the connection
+     const CAddress addrBind;
+     const std::string m_addr_name;
+     //! Whether this peer is an inbound onion, i.e. connected via our Tor onion service.
+     const bool m_inbound_onion;
+     std::atomic<int> nVersion{0};
+     Mutex m_subver_mutex;
+     /**
+      * cleanSubVer is a sanitized string of the user agent byte array we read
+      * from the wire. This cleaned string can safely be logged or displayed.
+      */
+     std::string cleanSubVer GUARDED_BY(m_subver_mutex){};
+     bool m_prefer_evict{false}; // This peer is preferred for eviction.
+     bool HasPermission(NetPermissionFlags permission) const {
+         return NetPermissions::HasFlag(m_permissionFlags, permission);
+     }
+     bool fClient{false}; // set by version message
+     bool m_limited_node{false}; //after BIP159, set by version message
+     /** fSuccessfullyConnected is set to true on receiving VERACK from the peer. */
+     std::atomic_bool fSuccessfullyConnected{false};
+     // Setting fDisconnect to true will cause the node to be disconnected the
+     // next time DisconnectNodes() runs
+     std::atomic_bool fDisconnect{false};
+     CSemaphoreGrant grantOutbound;
+     std::atomic<int> nRefCount{0};
+ 
+     const uint64_t nKeyedNetGroup;
+     std::atomic_bool fPauseRecv{false};
+     std::atomic_bool fPauseSend{false};
+ 
+     bool IsOutboundOrBlockRelayConn() const {
+         switch (m_conn_type) {
+             case ConnectionType::OUTBOUND_FULL_RELAY:
+             case ConnectionType::BLOCK_RELAY:
+                 return true;
+             case ConnectionType::INBOUND:
+             case ConnectionType::MANUAL:
+             case ConnectionType::ADDR_FETCH:
+             case ConnectionType::FEELER:
+                 return false;
+         } // no default case, so the compiler can warn about missing cases
+ 
+         assert(false);
+     }
+ 
+     bool IsFullOutboundConn() const {
+         return m_conn_type == ConnectionType::OUTBOUND_FULL_RELAY;
+     }
+ 
+     bool IsManualConn() const {
+         return m_conn_type == ConnectionType::MANUAL;
+     }
+ 
+     bool IsBlockOnlyConn() const {
+         return m_conn_type == ConnectionType::BLOCK_RELAY;
+     }
+ 
+     bool IsFeelerConn() const {
+         return m_conn_type == ConnectionType::FEELER;
+     }
+ 
+     bool IsAddrFetchConn() const {
+         return m_conn_type == ConnectionType::ADDR_FETCH;
+     }
+ 
+     bool IsInboundConn() const {
+         return m_conn_type == ConnectionType::INBOUND;
+     }
+ 
+     bool ExpectServicesFromConn() const {
+         switch (m_conn_type) {
+             case ConnectionType::INBOUND:
+             case ConnectionType::MANUAL:
+             case ConnectionType::FEELER:
+                 return false;
+             case ConnectionType::OUTBOUND_FULL_RELAY:
+             case ConnectionType::BLOCK_RELAY:
+             case ConnectionType::ADDR_FETCH:
+                 return true;
+         } // no default case, so the compiler can warn about missing cases
+ 
+         assert(false);
+     }
+ 
+     /**
+      * Get network the peer connected through.
+      *
+      * Returns Network::NET_ONION for *inbound* onion connections,
+      * and CNetAddr::GetNetClass() otherwise. The latter cannot be used directly
+      * because it doesn't detect the former, and it's not the responsibility of
+      * the CNetAddr class to know the actual network a peer is connected through.
+      *
+      * @return network the peer connected through.
+      */
+     Network ConnectedThroughNetwork() const;
+ 
+     // We selected peer as (compact blocks) high-bandwidth peer (BIP152)
+     std::atomic<bool> m_bip152_highbandwidth_to{false};
+     // Peer selected us as (compact blocks) high-bandwidth peer (BIP152)
+     std::atomic<bool> m_bip152_highbandwidth_from{false};
+ 
+     struct TxRelay {
+         mutable RecursiveMutex cs_filter;
+         // We use fRelayTxes for two purposes -
+         // a) it allows us to not relay tx invs before receiving the peer's version message
+         // b) the peer may tell us in its version message that we should not relay tx invs
+         //    unless it loads a bloom filter.
+         bool fRelayTxes GUARDED_BY(cs_filter){false};
+         std::unique_ptr<CBloomFilter> pfilter PT_GUARDED_BY(cs_filter) GUARDED_BY(cs_filter){nullptr};
+ 
+         mutable RecursiveMutex cs_tx_inventory;
+         CRollingBloomFilter filterInventoryKnown GUARDED_BY(cs_tx_inventory){50000, 0.000001};
+         // Set of transaction ids we still have to announce.
+         // They are sorted by the mempool before relay, so the order is not important.
+         std::set<uint256> setInventoryTxToSend;
+         // Used for BIP35 mempool sending
+         bool fSendMempool GUARDED_BY(cs_tx_inventory){false};
+         // Last time a "MEMPOOL" request was serviced.
+         std::atomic<std::chrono::seconds> m_last_mempool_req{0s};
+         std::chrono::microseconds nNextInvSend{0};
+ 
+         /** Minimum fee rate with which to filter inv's to this node */
+         std::atomic<CAmount> minFeeFilter{0};
+         CAmount lastSentFeeFilter{0};
+         std::chrono::microseconds m_next_send_feefilter{0};
+     };
+ 
+     // m_tx_relay == nullptr if we're not relaying transactions with this peer
+     std::unique_ptr<TxRelay> m_tx_relay;
+ 
+     /** UNIX epoch time of the last block received from this peer that we had
+      * not yet seen (e.g. not already received from another peer), that passed
+      * preliminary validity checks and was saved to disk, even if we don't
+      * connect the block or it eventually fails connection. Used as an inbound
+      * peer eviction criterium in CConnman::AttemptToEvictConnection. */
+     std::atomic<std::chrono::seconds> m_last_block_time{0s};
+ 
+     /** UNIX epoch time of the last transaction received from this peer that we
+      * had not yet seen (e.g. not already received from another peer) and that
+      * was accepted into our mempool. Used as an inbound peer eviction criterium
+      * in CConnman::AttemptToEvictConnection. */
+     std::atomic<std::chrono::seconds> m_last_tx_time{0s};
+ 
+     /** Last measured round-trip time. Used only for RPC/GUI stats/debugging.*/
+     std::atomic<std::chrono::microseconds> m_last_ping_time{0us};
+ 
+     /** Lowest measured round-trip time. Used as an inbound peer eviction
+      * criterium in CConnman::AttemptToEvictConnection. */
+     std::atomic<std::chrono::microseconds> m_min_ping_time{std::chrono::microseconds::max()};
++    // peercoin: used to detect branch switches
++    uint256 lastAcceptedHeader;
+ 
+     CNode(NodeId id, ServiceFlags nLocalServicesIn, std::shared_ptr<Sock> sock, const CAddress& addrIn, uint64_t nKeyedNetGroupIn, uint64_t nLocalHostNonceIn, const CAddress& addrBindIn, const std::string& addrNameIn, ConnectionType conn_type_in, bool inbound_onion);
+     CNode(const CNode&) = delete;
+     CNode& operator=(const CNode&) = delete;
+ 
+     NodeId GetId() const {
+         return id;
+     }
+ 
+     uint64_t GetLocalNonce() const {
+         return nLocalHostNonce;
+     }
+ 
+     int GetRefCount() const
+     {
+         assert(nRefCount >= 0);
+         return nRefCount;
+     }
+ 
+     /**
+      * Receive bytes from the buffer and deserialize them into messages.
+      *
+      * @param[in]   msg_bytes   The raw data
+      * @param[out]  complete    Set True if at least one message has been
+      *                          deserialized and is ready to be processed
+      * @return  True if the peer should stay connected,
+      *          False if the peer should be disconnected from.
+      */
+     bool ReceiveMsgBytes(Span<const uint8_t> msg_bytes, bool& complete);
+ 
+     void SetCommonVersion(int greatest_common_version)
+     {
+         Assume(m_greatest_common_version == INIT_PROTO_VERSION);
+         m_greatest_common_version = greatest_common_version;
+     }
+     int GetCommonVersion() const
+     {
+         return m_greatest_common_version;
+     }
+ 
+     CService GetAddrLocal() const LOCKS_EXCLUDED(m_addr_local_mutex);
+     //! May not be called more than once
+     void SetAddrLocal(const CService& addrLocalIn) LOCKS_EXCLUDED(m_addr_local_mutex);
+ 
+     CNode* AddRef()
+     {
+         nRefCount++;
+         return this;
+     }
+ 
+     void Release()
+     {
+         nRefCount--;
+     }
+ 
+     void AddKnownTx(const uint256& hash)
+     {
+         if (m_tx_relay != nullptr) {
+             LOCK(m_tx_relay->cs_tx_inventory);
+             m_tx_relay->filterInventoryKnown.insert(hash);
+         }
+     }
+ 
+     void PushTxInventory(const uint256& hash)
+     {
+         if (m_tx_relay == nullptr) return;
+         LOCK(m_tx_relay->cs_tx_inventory);
+         if (!m_tx_relay->filterInventoryKnown.contains(hash)) {
+             m_tx_relay->setInventoryTxToSend.insert(hash);
+         }
+     }
+ 
+     void CloseSocketDisconnect();
+ 
+     void CopyStats(CNodeStats& stats);
+ 
+     ServiceFlags GetLocalServices() const
+     {
+         return nLocalServices;
+     }
+ 
+     std::string ConnectionTypeAsString() const { return ::ConnectionTypeAsString(m_conn_type); }
+ 
+     /** A ping-pong round trip has completed successfully. Update latest and minimum ping times. */
+     void PongReceived(std::chrono::microseconds ping_time) {
+         m_last_ping_time = ping_time;
+         m_min_ping_time = std::min(m_min_ping_time.load(), ping_time);
+     }
+@@ -959,327 +966,327 @@ public:
+     /** Return true if we should disconnect the peer for failing an inactivity check. */
+     bool ShouldRunInactivityChecks(const CNode& node, std::chrono::seconds now) const;
+ 
++    /**
++     * This is signaled when network activity should cease.
++     * A pointer to it is saved in `m_i2p_sam_session`, so make sure that
++     * the lifetime of `interruptNet` is not shorter than
++     * the lifetime of `m_i2p_sam_session`.
++     */
++    CThreadInterrupt interruptNet;
++
+ private:
+     struct ListenSocket {
+     public:
+         std::shared_ptr<Sock> sock;
+         inline void AddSocketPermissionFlags(NetPermissionFlags& flags) const { NetPermissions::AddFlag(flags, m_permissions); }
+         ListenSocket(std::shared_ptr<Sock> sock_, NetPermissionFlags permissions_)
+             : sock{sock_}, m_permissions{permissions_}
+         {
+         }
+ 
+     private:
+         NetPermissionFlags m_permissions;
+     };
+ 
+     bool BindListenPort(const CService& bindAddr, bilingual_str& strError, NetPermissionFlags permissions);
+     bool Bind(const CService& addr, unsigned int flags, NetPermissionFlags permissions);
+     bool InitBinds(const Options& options);
+ 
+     void ThreadOpenAddedConnections();
+     void AddAddrFetch(const std::string& strDest);
+     void ProcessAddrFetch();
+     void ThreadOpenConnections(std::vector<std::string> connect);
+     void ThreadMessageHandler();
+     void ThreadI2PAcceptIncoming();
+     void AcceptConnection(const ListenSocket& hListenSocket);
+ 
+     /**
+      * Create a `CNode` object from a socket that has just been accepted and add the node to
+      * the `m_nodes` member.
+      * @param[in] sock Connected socket to communicate with the peer.
+      * @param[in] permissionFlags The peer's permissions.
+      * @param[in] addr_bind The address and port at our side of the connection.
+      * @param[in] addr The address and port at the peer's side of the connection.
+      */
+     void CreateNodeFromAcceptedSocket(std::unique_ptr<Sock>&& sock,
+                                       NetPermissionFlags permissionFlags,
+                                       const CAddress& addr_bind,
+                                       const CAddress& addr);
+ 
+     void DisconnectNodes();
+     void NotifyNumConnectionsChanged();
+     /** Return true if the peer is inactive and should be disconnected. */
+     bool InactivityCheck(const CNode& node) const;
+ 
+     /**
+      * Generate a collection of sockets to check for IO readiness.
+      * @param[in] nodes Select from these nodes' sockets.
+      * @param[out] recv_set Sockets to check for read readiness.
+      * @param[out] send_set Sockets to check for write readiness.
+      * @param[out] error_set Sockets to check for errors.
+      * @return true if at least one socket is to be checked (the returned set is not empty)
+      */
+     bool GenerateSelectSet(const std::vector<CNode*>& nodes,
+                            std::set<SOCKET>& recv_set,
+                            std::set<SOCKET>& send_set,
+                            std::set<SOCKET>& error_set);
+ 
+     /**
+      * Check which sockets are ready for IO.
+      * @param[in] nodes Select from these nodes' sockets.
+      * @param[out] recv_set Sockets which are ready for read.
+      * @param[out] send_set Sockets which are ready for write.
+      * @param[out] error_set Sockets which have errors.
+      * This calls `GenerateSelectSet()` to gather a list of sockets to check.
+      */
+     void SocketEvents(const std::vector<CNode*>& nodes,
+                       std::set<SOCKET>& recv_set,
+                       std::set<SOCKET>& send_set,
+                       std::set<SOCKET>& error_set);
+ 
+     /**
+      * Check connected and listening sockets for IO readiness and process them accordingly.
+      */
+     void SocketHandler();
+ 
+     /**
+      * Do the read/write for connected sockets that are ready for IO.
+      * @param[in] nodes Nodes to process. The socket of each node is checked against
+      * `recv_set`, `send_set` and `error_set`.
+      * @param[in] recv_set Sockets that are ready for read.
+      * @param[in] send_set Sockets that are ready for send.
+      * @param[in] error_set Sockets that have an exceptional condition (error).
+      */
+     void SocketHandlerConnected(const std::vector<CNode*>& nodes,
+                                 const std::set<SOCKET>& recv_set,
+                                 const std::set<SOCKET>& send_set,
+                                 const std::set<SOCKET>& error_set);
+ 
+     /**
+      * Accept incoming connections, one from each read-ready listening socket.
+      * @param[in] recv_set Sockets that are ready for read.
+      */
+     void SocketHandlerListening(const std::set<SOCKET>& recv_set);
+ 
+     void ThreadSocketHandler();
+     void ThreadDNSAddressSeed();
+ 
+     uint64_t CalculateKeyedNetGroup(const CAddress& ad) const;
+ 
+     CNode* FindNode(const CNetAddr& ip);
+     CNode* FindNode(const CSubNet& subNet);
+     CNode* FindNode(const std::string& addrName);
+     CNode* FindNode(const CService& addr);
+ 
+     /**
+      * Determine whether we're already connected to a given address, in order to
+      * avoid initiating duplicate connections.
+      */
+     bool AlreadyConnectedToAddress(const CAddress& addr);
+ 
+     bool AttemptToEvictConnection();
+     CNode* ConnectNode(CAddress addrConnect, const char *pszDest, bool fCountFailure, ConnectionType conn_type);
+     void AddWhitelistPermissionFlags(NetPermissionFlags& flags, const CNetAddr &addr) const;
+ 
+     void DeleteNode(CNode* pnode);
+ 
+     NodeId GetNewNodeId();
+ 
+     size_t SocketSendData(CNode& node) const EXCLUSIVE_LOCKS_REQUIRED(node.cs_vSend);
+     void DumpAddresses();
+ 
+     // Network stats
+     void RecordBytesRecv(uint64_t bytes);
+     void RecordBytesSent(uint64_t bytes);
+ 
+     /**
+      * Return vector of current BLOCK_RELAY peers.
+      */
+     std::vector<CAddress> GetCurrentBlockRelayOnlyConns() const;
+ 
+     // Whether the node should be passed out in ForEach* callbacks
+     static bool NodeFullyConnected(const CNode* pnode);
+ 
+     // Network usage totals
+     mutable RecursiveMutex cs_totalBytesSent;
+     std::atomic<uint64_t> nTotalBytesRecv{0};
+     uint64_t nTotalBytesSent GUARDED_BY(cs_totalBytesSent) {0};
+ 
+     // outbound limit & stats
+     uint64_t nMaxOutboundTotalBytesSentInCycle GUARDED_BY(cs_totalBytesSent) {0};
+     std::chrono::seconds nMaxOutboundCycleStartTime GUARDED_BY(cs_totalBytesSent) {0};
+     uint64_t nMaxOutboundLimit GUARDED_BY(cs_totalBytesSent);
+ 
+     // P2P timeout in seconds
+     std::chrono::seconds m_peer_connect_timeout;
+ 
+     // Whitelisted ranges. Any node connecting from these is automatically
+     // whitelisted (as well as those connecting to whitelisted binds).
+     std::vector<NetWhitelistPermissions> vWhitelistedRange;
+ 
+     unsigned int nSendBufferMaxSize{0};
+     unsigned int nReceiveFloodSize{0};
+ 
+     std::vector<ListenSocket> vhListenSocket;
+     std::atomic<bool> fNetworkActive{true};
+     bool fAddressesInitialized{false};
+     AddrMan& addrman;
+     std::deque<std::string> m_addr_fetches GUARDED_BY(m_addr_fetches_mutex);
+     Mutex m_addr_fetches_mutex;
+     std::vector<std::string> m_added_nodes GUARDED_BY(m_added_nodes_mutex);
+     mutable Mutex m_added_nodes_mutex;
+     std::vector<CNode*> m_nodes GUARDED_BY(m_nodes_mutex);
+     std::list<CNode*> m_nodes_disconnected;
+     mutable RecursiveMutex m_nodes_mutex;
+     std::atomic<NodeId> nLastNodeId{0};
+     unsigned int nPrevNodeCount{0};
+ 
+     /**
+      * Cache responses to addr requests to minimize privacy leak.
+      * Attack example: scraping addrs in real-time may allow an attacker
+      * to infer new connections of the victim by detecting new records
+      * with fresh timestamps (per self-announcement).
+      */
+     struct CachedAddrResponse {
+         std::vector<CAddress> m_addrs_response_cache;
+         std::chrono::microseconds m_cache_entry_expiration{0};
+     };
+ 
+     /**
+      * Addr responses stored in different caches
+      * per (network, local socket) prevent cross-network node identification.
+      * If a node for example is multi-homed under Tor and IPv6,
+      * a single cache (or no cache at all) would let an attacker
+      * to easily detect that it is the same node by comparing responses.
+      * Indexing by local socket prevents leakage when a node has multiple
+      * listening addresses on the same network.
+      *
+      * The used memory equals to 1000 CAddress records (or around 40 bytes) per
+      * distinct Network (up to 5) we have/had an inbound peer from,
+      * resulting in at most ~196 KB. Every separate local socket may
+      * add up to ~196 KB extra.
+      */
+     std::map<uint64_t, CachedAddrResponse> m_addr_response_caches;
+ 
+     /**
+      * Services this instance offers.
+      *
+      * This data is replicated in each CNode instance we create during peer
+      * connection (in ConnectNode()) under a member also called
+      * nLocalServices.
+      *
+      * This data is not marked const, but after being set it should not
+      * change. See the note in CNode::nLocalServices documentation.
+      *
+      * \sa CNode::nLocalServices
+      */
+     ServiceFlags nLocalServices;
+ 
+     std::unique_ptr<CSemaphore> semOutbound;
+     std::unique_ptr<CSemaphore> semAddnode;
+     int nMaxConnections;
+ 
+     // How many full-relay (tx, block, addr) outbound peers we want
+     int m_max_outbound_full_relay;
+ 
+     // How many block-relay only outbound peers we want
+     // We do not relay tx or addr messages with these peers
+     int m_max_outbound_block_relay;
+ 
+     int nMaxAddnode;
+     int nMaxFeeler;
+     int m_max_outbound;
+     bool m_use_addrman_outgoing;
+     CClientUIInterface* m_client_interface;
+     NetEventsInterface* m_msgproc;
+     /** Pointer to this node's banman. May be nullptr - check existence before dereferencing. */
+     BanMan* m_banman;
+ 
+     /**
+      * Addresses that were saved during the previous clean shutdown. We'll
+      * attempt to make block-relay-only connections to them.
+      */
+     std::vector<CAddress> m_anchors;
+ 
+     /** SipHasher seeds for deterministic randomness */
+     const uint64_t nSeed0, nSeed1;
+ 
+     /** flag for waking the message processor. */
+     bool fMsgProcWake GUARDED_BY(mutexMsgProc);
+ 
+     std::condition_variable condMsgProc;
+     Mutex mutexMsgProc;
+     std::atomic<bool> flagInterruptMsgProc{false};
+ 
+-    /**
+-     * This is signaled when network activity should cease.
+-     * A pointer to it is saved in `m_i2p_sam_session`, so make sure that
+-     * the lifetime of `interruptNet` is not shorter than
+-     * the lifetime of `m_i2p_sam_session`.
+-     */
+-    CThreadInterrupt interruptNet;
+-
+     /**
+      * I2P SAM session.
+      * Used to accept incoming and make outgoing I2P connections.
+      */
+     std::unique_ptr<i2p::sam::Session> m_i2p_sam_session;
+ 
+     std::thread threadDNSAddressSeed;
+     std::thread threadSocketHandler;
+     std::thread threadOpenAddedConnections;
+     std::thread threadOpenConnections;
+     std::thread threadMessageHandler;
+     std::thread threadI2PAcceptIncoming;
+ 
+     /** flag for deciding to connect to an extra outbound peer,
+      *  in excess of m_max_outbound_full_relay
+      *  This takes the place of a feeler connection */
+     std::atomic_bool m_try_another_outbound_peer;
+ 
+     /** flag for initiating extra block-relay-only peer connections.
+      *  this should only be enabled after initial chain sync has occurred,
+      *  as these connections are intended to be short-lived and low-bandwidth.
+      */
+     std::atomic_bool m_start_extra_block_relay_peers{false};
+ 
+     /**
+      * A vector of -bind=<address>:<port>=onion arguments each of which is
+      * an address and port that are designated for incoming Tor connections.
+      */
+     std::vector<CService> m_onion_binds;
+ 
+     /**
+      * RAII helper to atomically create a copy of `m_nodes` and add a reference
+      * to each of the nodes. The nodes are released when this object is destroyed.
+      */
+     class NodesSnapshot
+     {
+     public:
+         explicit NodesSnapshot(const CConnman& connman, bool shuffle)
+         {
+             {
+                 LOCK(connman.m_nodes_mutex);
+                 m_nodes_copy = connman.m_nodes;
+                 for (auto& node : m_nodes_copy) {
+                     node->AddRef();
+                 }
+             }
+             if (shuffle) {
+                 Shuffle(m_nodes_copy.begin(), m_nodes_copy.end(), FastRandomContext{});
+             }
+         }
+ 
+         ~NodesSnapshot()
+         {
+             for (auto& node : m_nodes_copy) {
+                 node->Release();
+             }
+         }
+ 
+         const std::vector<CNode*>& Nodes() const
+         {
+             return m_nodes_copy;
+         }
+ 
+     private:
+         std::vector<CNode*> m_nodes_copy;
+     };
+ 
+     friend struct CConnmanTest;
+     friend struct ConnmanTestMsg;
+ };
+ 
+ /** Dump binary message to file, with timestamp */

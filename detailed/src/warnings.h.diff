@@ -1,0 +1,15 @@
+diff --git a/src/warnings.h b/src/warnings.h
+index b21e2ea2b8..9569ca147f 100644
+--- a/src/warnings.h
++++ b/src/warnings.h
+@@ -15,9 +15,10 @@ void SetfLargeWorkInvalidChainFound(bool flag);
+ /** Format a string that describes several potential problems detected by the core.
+  * @param[in] verbose bool
+  * - if true, get all warnings separated by <hr />
+  * - if false, get the most important warning
+  * @returns the warning string
+  */
+ bilingual_str GetWarnings(bool verbose);
+ 
++extern std::string strMintWarning;
+ #endif // BITCOIN_WARNINGS_H

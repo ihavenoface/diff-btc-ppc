@@ -1,0 +1,35 @@
+diff --git a/src/dummywallet.cpp b/src/dummywallet.cpp
+index 2b94ed611b..72af020942 100644
+--- a/src/dummywallet.cpp
++++ b/src/dummywallet.cpp
+@@ -26,30 +26,28 @@ public:
+ void DummyWalletInit::AddWalletOptions(ArgsManager& argsman) const
+ {
+     argsman.AddHiddenArgs({
+         "-addresstype",
+         "-avoidpartialspends",
+         "-changetype",
+         "-consolidatefeerate=<amt>",
+         "-disablewallet",
+         "-discardfee=<amt>",
+         "-fallbackfee=<amt>",
+         "-keypool=<n>",
+         "-maxapsfee=<n>",
+-        "-maxtxfee=<amt>",
+         "-mintxfee=<amt>",
+         "-paytxfee=<amt>",
+         "-signer=<cmd>",
+         "-spendzeroconfchange",
+         "-txconfirmtarget=<n>",
+         "-wallet=<path>",
+         "-walletbroadcast",
+         "-walletdir=<dir>",
+         "-walletnotify=<cmd>",
+-        "-walletrbf",
+         "-dblogsize=<n>",
+         "-flushwallet",
+         "-privdb",
+         "-walletrejectlongchains",
+         "-unsafesqlitesync",
+     });
+ }

@@ -1,0 +1,65 @@
+diff --git a/src/util/system.cpp b/src/util/system.cpp
+index 27b1f02c73..abe3aec0cd 100644
+--- a/src/util/system.cpp
++++ b/src/util/system.cpp
+@@ -90,7 +90,7 @@
+ // Application startup time (used for uptime calculation)
+ const int64_t nStartupTime = GetTime();
+ 
+-const char * const BITCOIN_CONF_FILENAME = "bitcoin.conf";
++const char * const BITCOIN_CONF_FILENAME = "peercoin.conf";
+ const char * const BITCOIN_SETTINGS_FILENAME = "settings.json";
+ 
+ ArgsManager gArgs;
+@@ -772,15 +772,15 @@ std::string HelpMessageOpt(const std::string &option, const std::string &message
+ static std::string FormatException(const std::exception* pex, const char* pszThread)
+ {
+ #ifdef WIN32
+     char pszModule[MAX_PATH] = "";
+     GetModuleFileNameA(nullptr, pszModule, sizeof(pszModule));
+ #else
+-    const char* pszModule = "bitcoin";
++    const char* pszModule = "peercoin";
+ #endif
+     if (pex)
+         return strprintf(
+             "EXCEPTION: %s       \n%s       \n%s in %s       \n", typeid(*pex).name(), pex->what(), pszModule, pszThread);
+     else
+         return strprintf(
+             "UNKNOWN EXCEPTION       \n%s in %s       \n", pszModule, pszThread);
+ }
+@@ -794,25 +794,26 @@ void PrintExceptionContinue(const std::exception* pex, const char* pszThread)
+ 
+ fs::path GetDefaultDataDir()
+ {
+-    // Windows: C:\Users\Username\AppData\Roaming\Bitcoin
+-    // macOS: ~/Library/Application Support/Bitcoin
+-    // Unix-like: ~/.bitcoin
++    // Windows < Vista: C:\Documents and Settings\Username\Application Data\Peercoin
++    // Windows >= Vista: C:\Users\Username\AppData\Roaming\Peercoin
++    // Mac: ~/Library/Application Support/Peercoin
++    // Unix: ~/.peercoin
+ #ifdef WIN32
+     // Windows
+-    return GetSpecialFolderPath(CSIDL_APPDATA) / "Bitcoin";
++    return GetSpecialFolderPath(CSIDL_APPDATA) / "Peercoin";
+ #else
+     fs::path pathRet;
+     char* pszHome = getenv("HOME");
+     if (pszHome == nullptr || strlen(pszHome) == 0)
+         pathRet = fs::path("/");
+     else
+         pathRet = fs::path(pszHome);
+ #ifdef MAC_OSX
+-    // macOS
+-    return pathRet / "Library/Application Support/Bitcoin";
++    // Mac
++    return pathRet / "Library/Application Support/Peercoin";
+ #else
+-    // Unix-like
+-    return pathRet / ".bitcoin";
++    // Unix
++    return pathRet / ".peercoin";
+ #endif
+ #endif
+ }

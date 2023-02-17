@@ -1,0 +1,80 @@
+diff --git a/src/rest.cpp b/src/rest.cpp
+index 063872b47a..9d2a8a930a 100644
+--- a/src/rest.cpp
++++ b/src/rest.cpp
+@@ -33,7 +33,6 @@
+ #include <univalue.h>
+ 
+ using node::GetTransaction;
+-using node::IsBlockPruned;
+ using node::NodeContext;
+ using node::ReadBlockFromDisk;
+ 
+@@ -271,67 +270,65 @@ static bool rest_headers(const std::any& context,
+ static bool rest_block(const std::any& context,
+                        HTTPRequest* req,
+                        const std::string& strURIPart,
+                        TxVerbosity tx_verbosity)
+ {
+     if (!CheckWarmup(req))
+         return false;
+     std::string hashStr;
+     const RetFormat rf = ParseDataFormat(hashStr, strURIPart);
+ 
+     uint256 hash;
+     if (!ParseHashStr(hashStr, hash))
+         return RESTERR(req, HTTP_BAD_REQUEST, "Invalid hash: " + hashStr);
+ 
+     CBlock block;
+     CBlockIndex* pblockindex = nullptr;
+     CBlockIndex* tip = nullptr;
+     {
+         ChainstateManager* maybe_chainman = GetChainman(context, req);
+         if (!maybe_chainman) return false;
+         ChainstateManager& chainman = *maybe_chainman;
+         LOCK(cs_main);
+         tip = chainman.ActiveChain().Tip();
+         pblockindex = chainman.m_blockman.LookupBlockIndex(hash);
+         if (!pblockindex) {
+             return RESTERR(req, HTTP_NOT_FOUND, hashStr + " not found");
+         }
+ 
+-        if (IsBlockPruned(pblockindex))
+-            return RESTERR(req, HTTP_NOT_FOUND, hashStr + " not available (pruned data)");
+ 
+         if (!ReadBlockFromDisk(block, pblockindex, Params().GetConsensus()))
+             return RESTERR(req, HTTP_NOT_FOUND, hashStr + " not found");
+     }
+ 
+     switch (rf) {
+     case RetFormat::BINARY: {
+         CDataStream ssBlock(SER_NETWORK, PROTOCOL_VERSION | RPCSerializationFlags());
+         ssBlock << block;
+         std::string binaryBlock = ssBlock.str();
+         req->WriteHeader("Content-Type", "application/octet-stream");
+         req->WriteReply(HTTP_OK, binaryBlock);
+         return true;
+     }
+ 
+     case RetFormat::HEX: {
+         CDataStream ssBlock(SER_NETWORK, PROTOCOL_VERSION | RPCSerializationFlags());
+         ssBlock << block;
+         std::string strHex = HexStr(ssBlock) + "\n";
+         req->WriteHeader("Content-Type", "text/plain");
+         req->WriteReply(HTTP_OK, strHex);
+         return true;
+     }
+ 
+     case RetFormat::JSON: {
+         UniValue objBlock = blockToJSON(block, tip, pblockindex, tx_verbosity);
+         std::string strJSON = objBlock.write() + "\n";
+         req->WriteHeader("Content-Type", "application/json");
+         req->WriteReply(HTTP_OK, strJSON);
+         return true;
+     }
+ 
+     default: {
+         return RESTERR(req, HTTP_NOT_FOUND, "output format not found (available: " + AvailableDataFormatsString() + ")");
+     }
+     }
+ }

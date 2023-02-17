@@ -1,0 +1,26 @@
+diff --git a/src/psbt.h b/src/psbt.h
+index f0ceb02481..a78d6d6a73 100644
+--- a/src/psbt.h
++++ b/src/psbt.h
+@@ -1,21 +1,20 @@
+ // Copyright (c) 2009-2021 The Bitcoin Core developers
+ // Distributed under the MIT software license, see the accompanying
+ // file COPYING or http://www.opensource.org/licenses/mit-license.php.
+ 
+ #ifndef BITCOIN_PSBT_H
+ #define BITCOIN_PSBT_H
+ 
+ #include <attributes.h>
+ #include <node/transaction.h>
+-#include <policy/feerate.h>
+ #include <primitives/transaction.h>
+ #include <pubkey.h>
+ #include <script/keyorigin.h>
+ #include <script/sign.h>
+ #include <script/signingprovider.h>
+ #include <span.h>
+ #include <streams.h>
+ 
+ #include <optional>
+ 
+ // Magic bytes

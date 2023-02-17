@@ -1,0 +1,50 @@
+diff --git a/src/warnings.cpp b/src/warnings.cpp
+index 60388cc713..2ecd96681e 100644
+--- a/src/warnings.cpp
++++ b/src/warnings.cpp
+@@ -15,6 +15,7 @@
+ static Mutex g_warnings_mutex;
+ static bilingual_str g_misc_warnings GUARDED_BY(g_warnings_mutex);
+ static bool fLargeWorkInvalidChainFound GUARDED_BY(g_warnings_mutex) = false;
++std::string strMintWarning;
+ 
+ void SetMiscWarning(const bilingual_str& warning)
+ {
+@@ -31,30 +32,37 @@ void SetfLargeWorkInvalidChainFound(bool flag)
+ bilingual_str GetWarnings(bool verbose)
+ {
+     bilingual_str warnings_concise;
+     std::vector<bilingual_str> warnings_verbose;
+ 
+     LOCK(g_warnings_mutex);
+ 
+     // Pre-release build warning
+     if (!CLIENT_VERSION_IS_RELEASE) {
+         warnings_concise = _("This is a pre-release test build - use at your own risk - do not use for mining or merchant applications");
+         warnings_verbose.emplace_back(warnings_concise);
+     }
+ 
++    // peercoin: wallet lock warning for minting
++    if (strMintWarning != "")
++    {
++        warnings_concise = Untranslated(strMintWarning);
++        warnings_verbose.emplace_back(warnings_concise);
++    }
++
+     // Misc warnings like out of disk space and clock is wrong
+     if (!g_misc_warnings.empty()) {
+         warnings_concise = g_misc_warnings;
+         warnings_verbose.emplace_back(warnings_concise);
+     }
+ 
+     if (fLargeWorkInvalidChainFound) {
+         warnings_concise = _("Warning: We do not appear to fully agree with our peers! You may need to upgrade, or other nodes may need to upgrade.");
+         warnings_verbose.emplace_back(warnings_concise);
+     }
+ 
+     if (verbose) {
+         return Join(warnings_verbose, Untranslated("<hr />"));
+     }
+ 
+     return warnings_concise;
+ }

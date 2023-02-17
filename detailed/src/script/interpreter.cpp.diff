@@ -1,0 +1,163 @@
+diff --git a/src/script/interpreter.cpp b/src/script/interpreter.cpp
+index 11b1a1c887..8ab82e4650 100644
+--- a/src/script/interpreter.cpp
++++ b/src/script/interpreter.cpp
+@@ -1284,83 +1284,87 @@ private:
+ public:
+     CTransactionSignatureSerializer(const T& txToIn, const CScript& scriptCodeIn, unsigned int nInIn, int nHashTypeIn) :
+         txTo(txToIn), scriptCode(scriptCodeIn), nIn(nInIn),
+         fAnyoneCanPay(!!(nHashTypeIn & SIGHASH_ANYONECANPAY)),
+         fHashSingle((nHashTypeIn & 0x1f) == SIGHASH_SINGLE),
+         fHashNone((nHashTypeIn & 0x1f) == SIGHASH_NONE) {}
+ 
+     /** Serialize the passed scriptCode, skipping OP_CODESEPARATORs */
+     template<typename S>
+     void SerializeScriptCode(S &s) const {
+         CScript::const_iterator it = scriptCode.begin();
+         CScript::const_iterator itBegin = it;
+         opcodetype opcode;
+         unsigned int nCodeSeparators = 0;
+         while (scriptCode.GetOp(it, opcode)) {
+             if (opcode == OP_CODESEPARATOR)
+                 nCodeSeparators++;
+         }
+         ::WriteCompactSize(s, scriptCode.size() - nCodeSeparators);
+         it = itBegin;
+         while (scriptCode.GetOp(it, opcode)) {
+             if (opcode == OP_CODESEPARATOR) {
+                 s.write(AsBytes(Span{&itBegin[0], size_t(it - itBegin - 1)}));
+                 itBegin = it;
+             }
+         }
+         if (itBegin != scriptCode.end())
+             s.write(AsBytes(Span{&itBegin[0], size_t(it - itBegin)}));
+     }
+ 
+     /** Serialize an input of txTo */
+     template<typename S>
+     void SerializeInput(S &s, unsigned int nInput) const {
+         // In case of SIGHASH_ANYONECANPAY, only the input being signed is serialized
+         if (fAnyoneCanPay)
+             nInput = nIn;
+         // Serialize the prevout
+         ::Serialize(s, txTo.vin[nInput].prevout);
+         // Serialize the script
+         if (nInput != nIn)
+             // Blank out other inputs' signatures
+             ::Serialize(s, CScript());
+         else
+             SerializeScriptCode(s);
+         // Serialize the nSequence
+         if (nInput != nIn && (fHashSingle || fHashNone))
+             // let the others update at will
+             ::Serialize(s, (int)0);
+         else
+             ::Serialize(s, txTo.vin[nInput].nSequence);
+     }
+ 
+     /** Serialize an output of txTo */
+     template<typename S>
+     void SerializeOutput(S &s, unsigned int nOutput) const {
+         if (fHashSingle && nOutput != nIn)
+             // Do not lock-in the txout payee at other indices as txin
+             ::Serialize(s, CTxOut());
+         else
+             ::Serialize(s, txTo.vout[nOutput]);
+     }
+ 
+     /** Serialize txTo */
+     template<typename S>
+     void Serialize(S &s) const {
+         // Serialize nVersion
+         ::Serialize(s, txTo.nVersion);
++        if (txTo.nVersion < 3) {
++            // Serialize nTime
++            ::Serialize(s, txTo.nTime);
++        }
+         // Serialize vin
+         unsigned int nInputs = fAnyoneCanPay ? 1 : txTo.vin.size();
+         ::WriteCompactSize(s, nInputs);
+         for (unsigned int nInput = 0; nInput < nInputs; nInput++)
+              SerializeInput(s, nInput);
+         // Serialize vout
+         unsigned int nOutputs = fHashNone ? 0 : (fHashSingle ? nIn+1 : txTo.vout.size());
+         ::WriteCompactSize(s, nOutputs);
+         for (unsigned int nOutput = 0; nOutput < nOutputs; nOutput++)
+              SerializeOutput(s, nOutput);
+         // Serialize nLockTime
+         ::Serialize(s, txTo.nLockTime);
+     }
+ };
+ 
+ /** Compute the (single) SHA256 of the concatenation of all prevouts of a tx. */
+@@ -1593,66 +1597,70 @@ template <class T>
+ uint256 SignatureHash(const CScript& scriptCode, const T& txTo, unsigned int nIn, int nHashType, const CAmount& amount, SigVersion sigversion, const PrecomputedTransactionData* cache)
+ {
+     assert(nIn < txTo.vin.size());
+ 
+     if (sigversion == SigVersion::WITNESS_V0) {
+         uint256 hashPrevouts;
+         uint256 hashSequence;
+         uint256 hashOutputs;
+         const bool cacheready = cache && cache->m_bip143_segwit_ready;
+ 
+         if (!(nHashType & SIGHASH_ANYONECANPAY)) {
+             hashPrevouts = cacheready ? cache->hashPrevouts : SHA256Uint256(GetPrevoutsSHA256(txTo));
+         }
+ 
+         if (!(nHashType & SIGHASH_ANYONECANPAY) && (nHashType & 0x1f) != SIGHASH_SINGLE && (nHashType & 0x1f) != SIGHASH_NONE) {
+             hashSequence = cacheready ? cache->hashSequence : SHA256Uint256(GetSequencesSHA256(txTo));
+         }
+ 
+ 
+         if ((nHashType & 0x1f) != SIGHASH_SINGLE && (nHashType & 0x1f) != SIGHASH_NONE) {
+             hashOutputs = cacheready ? cache->hashOutputs : SHA256Uint256(GetOutputsSHA256(txTo));
+         } else if ((nHashType & 0x1f) == SIGHASH_SINGLE && nIn < txTo.vout.size()) {
+             CHashWriter ss(SER_GETHASH, 0);
+             ss << txTo.vout[nIn];
+             hashOutputs = ss.GetHash();
+         }
+ 
+         CHashWriter ss(SER_GETHASH, 0);
+         // Version
+         ss << txTo.nVersion;
++        if (txTo.nVersion < 3) {
++            // nTime
++            ss << txTo.nTime;
++        }
+         // Input prevouts/nSequence (none/all, depending on flags)
+         ss << hashPrevouts;
+         ss << hashSequence;
+         // The input being signed (replacing the scriptSig with scriptCode + amount)
+         // The prevout may already be contained in hashPrevout, and the nSequence
+         // may already be contain in hashSequence.
+         ss << txTo.vin[nIn].prevout;
+         ss << scriptCode;
+         ss << amount;
+         ss << txTo.vin[nIn].nSequence;
+         // Outputs (none/one/all, depending on flags)
+         ss << hashOutputs;
+         // Locktime
+         ss << txTo.nLockTime;
+         // Sighash type
+         ss << nHashType;
+ 
+         return ss.GetHash();
+     }
+ 
+     // Check for invalid use of SIGHASH_SINGLE
+     if ((nHashType & 0x1f) == SIGHASH_SINGLE) {
+         if (nIn >= txTo.vout.size()) {
+             //  nOut out of range
+             return uint256::ONE;
+         }
+     }
+ 
+     // Wrapper to serialize only the necessary parts of the transaction being signed
+     CTransactionSignatureSerializer<T> txTmp(txTo, scriptCode, nIn, nHashType);
+ 
+     // Serialize and hash
+     CHashWriter ss(SER_GETHASH, 0);
+     ss << txTmp << nHashType;
+     return ss.GetHash();
+ }

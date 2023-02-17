@@ -1,0 +1,31 @@
+diff --git a/src/primitives/block.cpp b/src/primitives/block.cpp
+index 50a30cb511..a38b97fc13 100644
+--- a/src/primitives/block.cpp
++++ b/src/primitives/block.cpp
+@@ -10,21 +10,23 @@
+ 
+ uint256 CBlockHeader::GetHash() const
+ {
+-    return SerializeHash(*this);
++    CBlockHeader tmp(*this);
++    tmp.nFlags = 0;
++    return SerializeHash(tmp);
+ }
+ 
+ std::string CBlock::ToString() const
+ {
+     std::stringstream s;
+-    s << strprintf("CBlock(hash=%s, ver=0x%08x, hashPrevBlock=%s, hashMerkleRoot=%s, nTime=%u, nBits=%08x, nNonce=%u, vtx=%u)\n",
++    s << strprintf("CBlock(hash=%s, ver=0x%08x, hashPrevBlock=%s, hashMerkleRoot=%s, nTime=%u, nBits=%08x, nNonce=%u, nFlags=%08x, vtx=%u)\n",
+         GetHash().ToString(),
+         nVersion,
+         hashPrevBlock.ToString(),
+         hashMerkleRoot.ToString(),
+         nTime, nBits, nNonce,
+-        vtx.size());
++        nFlags, vtx.size());
+     for (const auto& tx : vtx) {
+         s << "  " << tx->ToString() << "\n";
+     }
+     return s.str();
+ }

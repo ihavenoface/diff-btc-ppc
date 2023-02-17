@@ -1,0 +1,18 @@
+diff --git a/src/hash.cpp b/src/hash.cpp
+index f58b29e3ba..c80158ae9f 100644
+--- a/src/hash.cpp
++++ b/src/hash.cpp
+@@ -94,3 +94,12 @@ CHashWriter TaggedHash(const std::string& tag)
+     writer << taghash << taghash;
+     return writer;
+ }
++
++int32_t peercoinRandseed;
++int univHash(const uint256 &x) {
++  int h = peercoinRandseed >> 20;
++  const uint32_t *p = x.GetDataPtr();
++  for(int i = 0; i < 8; i++)
++    h ^=  (p[i] >> (h & 0xf)) + (peercoinRandseed >> i);
++  return (h + (h >> 16))  & 1023; // 2^n - 1
++}
+\ No newline at end of file
