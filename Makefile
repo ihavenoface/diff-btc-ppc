@@ -1,6 +1,11 @@
-SOURCE_COMMIT := fcf6c8f4eb217763545ede1766831a6b93f583bd # bitcoin tag v23.0
-TARGET_COMMIT := 6839e7cc431fd284b80fdf6a2d338aa03ca3ab6a # peercoin tag v0.12.1ppc
-COMPARE := $(addsuffix $(addprefix .., $(TARGET_COMMIT)), $(SOURCE_COMMIT))
+SOURCE_COMMIT ?= fcf6c8f4eb217763545ede1766831a6b93f583bd # bitcoin tag v23.0
+TARGET_COMMIT ?= 6839e7cc431fd284b80fdf6a2d338aa03ca3ab6a # peercoin tag v0.12.1ppc
+COMMIT_RANGE :=  $(SOURCE_COMMIT:%=%..$(TARGET_COMMIT))
+
+SOURCE_CODE := peercoin
+
+GIT_DIFF_OPTIONS := -C $(SOURCE_CODE) diff $(COMMIT_RANGE)
+DIFF2HTML_OPTIONS := -i file -F
 
 EXCLUDE := \
 	*.git* \
@@ -32,14 +37,14 @@ EXCLUDE := \
 	src/*int_utils.h \
 	src/bitcoin-cli.cpp \
 	src/key.cpp
-GIT_EXCLUDE := $(addprefix :^, $(EXCLUDE))
+GIT_EXCLUDE := $(EXCLUDE:%=:^%)
 
-files = $(shell git -C peercoin diff --name-only $(COMPARE) src $(GIT_EXCLUDE))
+TARGET_FILES = $(shell git $(GIT_DIFF_OPTIONS) --name-only src $(GIT_EXCLUDE))
 
-diff_template := $(addsuffix .diff, $(files))
-html_template := $(addsuffix .html, $(files))
-diff_template_detailed := $(addprefix detailed/, $(diff_template))
-html_template_detailed := $(addprefix detailed/, $(html_template))
+diff_template := $(TARGET_FILES:%=%.diff)
+html_template := $(TARGET_FILES:%=%.html)
+diff_template_detailed := $(diff_template:%=detailed/%)
+html_template_detailed := $(html_template:%=detailed/%)
 
 all : html html_detailed index.html btc-ppc-detailed.diff
 
@@ -51,28 +56,29 @@ html_detailed : $(html_template_detailed)
 clean :
 	rm -f index.html btc-ppc.diff btc-ppc-detailed.diff
 	rm -rf detailed src
+.PHONY : clean
 
-peercoin :
+$(SOURCE_CODE) :
 	git clone https://github.com/peercoin/peercoin $@
 	git -C $@ remote add bitcoin https://github.com/bitcoin/bitcoin
 	git -C $@ fetch bitcoin
 
-%.diff : peercoin
+%.diff : $(SOURCE_CODE)
 	mkdir -p $(@D)
-	git -C $^ diff $(COMPARE) -- $* > $@
+	git $(GIT_DIFF_OPTIONS) -- $* > $@
 
-detailed/%.diff : peercoin
+detailed/%.diff : $(SOURCE_CODE)
 	mkdir -p $(@D)
-	git -C $^ diff -W $(COMPARE) -- $* > $@
+	git $(GIT_DIFF_OPTIONS) -W -- $* > $@
 
 %.html : %.diff
-	diff2html -F $@ -i file -- $^
+	diff2html $(DIFF2HTML_OPTIONS) $@ -- $<
 
-btc-ppc.diff : peercoin
-	git -C $^ diff $(COMPARE) src > $@
+btc-ppc.diff : $(SOURCE_CODE)
+	git $(GIT_DIFF_OPTIONS) src > $@
 
-btc-ppc-detailed.diff : peercoin
-	git -C $^ diff -W $(COMPARE) src > $@
+btc-ppc-detailed.diff : $(SOURCE_CODE)
+	git $(GIT_DIFF_OPTIONS) -W src > $@
 
 index.html : btc-ppc.diff
-	diff2html -F index.html -i file -- btc-ppc.diff
+	diff2html $(DIFF2HTML_OPTIONS) index.html -- $^
