@@ -38,6 +38,8 @@ jobs:
         run: make peercoin
       - name: Compile
         run: make -j $(nproc) html index.html
+      - name: Clean up
+        run: rm -rf peercoin
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v1
         with:
